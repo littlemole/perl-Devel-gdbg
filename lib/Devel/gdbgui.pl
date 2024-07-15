@@ -82,6 +82,7 @@ my $lang;              # gtk source view language (perl)
 my $scheme;            # gtk source view theme to use
 my $infoBuffer;        # the buffer displaying lexical and call frame stack info
 my $lexicalsBuffer;    # gtk source buffer used to display lexicals vars
+my $subsBuffer;		   # buffer to display subs
 my %sourceBuffers;     # hash of buffers indexed by filename
 my $ctx;               # GTK main loop context
 
@@ -208,6 +209,19 @@ sub onMarker {
     my ( $self, $iter, $event ) = @_;
     my $line = $iter->get_line() + 1;
 
+	if($widgets{sourceView}->get_buffer() eq $subsBuffer) {
+
+		my $count = $subsBuffer->get_line_count();
+		my $endIter = $subsBuffer->get_iter_at_line($line);
+		if($line-1 >= $count) {
+			$endIter = $subsBuffer->get_end_iter();
+		}
+		my $text = $subsBuffer->get_text($iter,$endIter,1);
+		chomp($text);
+		$fifo->write("fb $text");
+		return;
+	}
+
     my $filename = $openFile;
 
     # cannot set break points in eval code
@@ -332,6 +346,7 @@ sub process_msg {
                 $breakpoints{$bpn} = $mark;
             }
         }
+
     }
     elsif ( $msg =~ /^load ([^,]+),(.*)/s ) {
 
@@ -353,8 +368,8 @@ sub process_msg {
     elsif ( $msg =~ /^subs (.*)/s ) {
 
         my $subs = $1;
-        $lexicalsBuffer->set_text( $subs, -1 );
-        $widgets{sourceView}->set_buffer($lexicalsBuffer);
+        $subsBuffer->set_text( $subs, -1 );
+        $widgets{sourceView}->set_buffer($subsBuffer);
     }
 }
 
@@ -543,6 +558,10 @@ sub build_ui {
     $lexicalsBuffer = Gtk::Source::Buffer->new();
     $lexicalsBuffer->set_language($lang);
     $lexicalsBuffer->set_style_scheme($scheme);
+
+    $subsBuffer = Gtk::Source::Buffer->new();
+    # $subsBuffer->set_language($lang);
+    $subsBuffer->set_style_scheme($scheme);
 
     enableButtons(0);
     $widgets{buttonStop}->set_sensitive(0);

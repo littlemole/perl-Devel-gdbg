@@ -45,6 +45,7 @@ use Data::Dumper;
 use PadWalker   qw(peek_my peek_our peek_sub closed_over);
 use Cwd         qw(getcwd);
 use File::Slurp qw(slurp write_file);
+use File::Basename;
 
 # shared lib for IPC between debugger and UI
 use Devel::dipc;
@@ -130,6 +131,40 @@ sub find_file {
         return getcwd() . "/$file";
     }
     return $file;
+}
+
+sub find_module {
+
+    my $fun = shift;
+    my $inc  = shift;
+
+    if ( !$inc ) {
+        $inc = \@INC;
+    }
+
+	$fun =~ s/::/\//g;
+	my $module = dirname($fun);
+
+    foreach my $i (@$inc) {
+        if ( -e "$i/$module.pm" ) {
+            return "$i/$module.pm";
+        }
+    }
+    foreach my $i (@$inc) {
+        if ( -e "$i/$module.pl" ) {
+            return "$i/$module.pl";
+        }
+    }
+
+    if ( -e getcwd() . "/$module.pm" ) {
+        return getcwd() . "/$module.pm";
+    }
+
+    if ( -e getcwd() . "/$module.pl" ) {
+        return getcwd() . "/$module.pl";
+    }
+
+    return $fun;
 }
 
 sub restoreBreakpoints {
@@ -353,8 +388,10 @@ sub brkonsub {
     for ( $2 .. $3 ) {
         next unless &checkdbline( $1, $_ );
         setdbline( $1, $_, 1 );
+		return $_;
         last;
     }
+	return -1;
 }
 
 sub getSubs {
@@ -425,6 +462,15 @@ sub process_msg {
         my $file = $1;
         my $line = $2;
         setBreakpoint( $file, $line );
+    }
+    elsif ( $msg =~ /fb (.*)/ ) {    # set breakpoint at fun
+
+        my $fun = $1;
+		my $file = find_module($fun);
+		my $line = brkonsub($fun);
+		$fifo->write("file $file,$line");
+		$fifo->write("marker $file,$line");
+		$breakpoints{"$file:$line"} = 1;
     }
     elsif ( $msg eq "p" ) {                     # dump brakpoint info
 
