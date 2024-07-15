@@ -1,0 +1,6 @@
+Revision history for Perl extension Devel::gdbg.
+
+0.01  Thu Jul 11 19:25:38 2024
+	- original version; created by h2xs 1.23 with options
+		-AX --skip-exporter --use-new-tests -n Devel::gdbg
+
