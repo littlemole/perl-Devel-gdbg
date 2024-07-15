@@ -37,173 +37,169 @@ use Fcntl;
 #
 # 	  $fifo->write("my message");
 #
-# reading however is async and non-blocking
+# reading however is async and non-blocking.
 # read clients are supposed to repeatingly
 # call $fifo->read() , e.g. in an event or
 # UI msg loop.
 #
 #     @msgs = $fifo->read();
-#	  foreach my $msg ( @msgs) { 
-# 		#do something 
+#	  foreach my $msg ( @msgs) {
+# 		#do something
 #	  }
 #
 # read will not block and return an empty
 # list if there are no msgs.
 ##########################################
 
-
 sub new {
 
-	my $class = shift;
+    my $class = shift;
 
-	my $self = {
-		state => 0,
-		buf => undef,
-		datalen => 0,
-	};
+    my $self = {
+        state   => 0,
+        buf     => undef,
+        datalen => 0,
+    };
 
-	bless $self, $class;
+    bless $self, $class;
 
-	return $self;
+    return $self;
 }
 
 sub write {
 
-	my $self = shift;
-	my $msg = shift;
+    my $self = shift;
+    my $msg  = shift;
 
-	my $data = $self->_encode_msg($msg);
+    my $data = $self->_encode_msg($msg);
 
-	my $fh = $self->{fout};
-	print $fh $data;
-	$fh->flush();
+    my $fh = $self->{fout};
+    print $fh $data;
+    $fh->flush();
 }
 
 sub read {
 
-	my $self = shift;
-	my $cb = shift;
+    my $self = shift;
+    my $cb   = shift;
 
-	$self->{msgs} = [];
+    $self->{msgs} = [];
 
-	if($self->{select}->can_read(0)) {
-		if($self->{state}) {
-			$self->_read_data();
-		}
-		else {
-			$self->_read_size();
-		}
-	}
-	my @result = @{$self->{msgs}};
-	$self->{msgs} = [];
-	return @result;
+    if ( $self->{select}->can_read(0) ) {
+        if ( $self->{state} ) {
+            $self->_read_data();
+        }
+        else {
+            $self->_read_size();
+        }
+    }
+    my @result = @{ $self->{msgs} };
+    $self->{msgs} = [];
+    return @result;
 }
 
 sub _read_size {
-	my $self = shift;
+    my $self = shift;
 
-	my $want = 4 - length($self->{buf});
+    my $want = 4 - length( $self->{buf} );
 
-	my $n = read($self->{fin},$self->{buf},$want,length($self->{buf}) );
-	if($n == 0 ) {
+    my $n = read( $self->{fin}, $self->{buf}, $want, length( $self->{buf} ) );
+    if ( $n == 0 ) {
 
-		return;
-	}
+        return;
+    }
 
-	if(length($self->{buf}) == 4) {
+    if ( length( $self->{buf} ) == 4 ) {
 
-		$self->{datalen} = unpack("N",$self->{buf});
-		$self->{buf} = undef;
-		$self->{state} = 1;
-		$self->_read_data();
-	}
+        $self->{datalen} = unpack( "N", $self->{buf} );
+        $self->{buf}     = undef;
+        $self->{state}   = 1;
+        $self->_read_data();
+    }
 }
 
 sub _read_data {
-	my $self = shift;
+    my $self = shift;
 
-	my $want = $self->{datalen} - length($self->{buf});
+    my $want = $self->{datalen} - length( $self->{buf} );
 
-	my $n = read( $self->{fin}, $self->{buf}, $want, length($self->{buf}) );
-	if($n == 0 ) {
+    my $n = read( $self->{fin}, $self->{buf}, $want, length( $self->{buf} ) );
+    if ( $n == 0 ) {
 
-		return;
-	}
+        return;
+    }
 
-	if( length($self->{buf}) == $self->{datalen} ) {
+    if ( length( $self->{buf} ) == $self->{datalen} ) {
 
-		my $msg = Encode::decode_utf8($self->{buf});
+        my $msg = Encode::decode_utf8( $self->{buf} );
 
-		$self->{buf} = undef;
-		$self->{datalen} = 0;
-		$self->{state} = 0;
+        $self->{buf}     = undef;
+        $self->{datalen} = 0;
+        $self->{state}   = 0;
 
-		push @{$self->{msgs}}, $msg;
+        push @{ $self->{msgs} }, $msg;
 
-		$self->_read_size();
-	}
+        $self->_read_size();
+    }
 
 }
 
 sub close {
 
-	my $self = shift;
-	if($self->{fout}) {
-		close (($self->{fout}));
-	}
-	if($self->{fin}) {
-		close (($self->{fin}));
-	}
+    my $self = shift;
+    if ( $self->{fout} ) {
+        close( ( $self->{fout} ) );
+    }
+    if ( $self->{fin} ) {
+        close( ( $self->{fin} ) );
+    }
 }
-
 
 sub _encode_msg {
-	my $self = shift;
-	my $msg = shift;
-	my $str = Encode::encode_utf8($msg);
-	my $l = length($str);
-	my $r = pack("N", $l);
-	$r .= $str;
-	return $r;
+    my $self = shift;
+    my $msg  = shift;
+    my $str  = Encode::encode_utf8($msg);
+    my $l    = length($str);
+    my $r    = pack( "N", $l );
+    $r .= $str;
+    return $r;
 }
-
 
 sub open_out {
 
-	my $self = shift;
-	my $out = shift;
+    my $self = shift;
+    my $out  = shift;
 
-	$self->_makemyfifo($out);
+    $self->_makemyfifo($out);
 
-	open my $fh, ">:raw", $out || die "can't open ".$out.": $!";
+    open my $fh, ">:raw", $out || die "can't open " . $out . ": $!";
 
-	$self->{fout} = $fh;
+    $self->{fout} = $fh;
 }
 
 sub open_in {
 
-	my $self = shift;
-	my $in = shift;
+    my $self = shift;
+    my $in   = shift;
 
-	$self->_makemyfifo($in);
+    $self->_makemyfifo($in);
 
-	my $fh;
-	sysopen($fh, $in, O_RDONLY|O_NONBLOCK)  ||  die "open ".$in." failed: $!";;
+    my $fh;
+    sysopen( $fh, $in, O_RDONLY | O_NONBLOCK )
+      || die "open " . $in . " failed: $!";
 
-	$self->{fin} = $fh;
+    $self->{fin} = $fh;
 
-	my $select = IO::Select->new();
-	$select->add($fh);
+    my $select = IO::Select->new();
+    $select->add($fh);
 
-	$self->{select} = $select;
+    $self->{select} = $select;
 }
 
 sub _makemyfifo {
-	my $self = shift;
-	my $path = shift;
-	eval {
-		mkfifo($path, 0777)     ||  die "mkfifo $path already exists: $!";
-	};
+    my $self = shift;
+    my $path = shift;
+    eval { mkfifo( $path, 0777 ) || die "mkfifo $path already exists: $!"; };
 }
 
 1;
