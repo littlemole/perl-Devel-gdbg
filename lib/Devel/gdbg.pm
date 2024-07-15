@@ -5,7 +5,6 @@ use utf8;
 use strict;
 use warnings;
 use File::Basename;
-use Data::Dumper;
 
 our @ISA = qw();
 
@@ -15,16 +14,14 @@ our $VERSION = '0.01';
 # first things first: fork the UI process
 ##################################################
 
-if ( !$ENV{"GDBG_NO_FORK"} ) {
-    my $ui = dirname( $INC{"Devel/gdbg.pm"} ) . "/gdbgui.pl";
+my $ui = dirname($INC{"Devel/gdbg.pm"})."/gdbgui.pl";
 
-    my $pid = fork();
-    if ( $pid == 0 ) {
-
-        # child displays UI
-        exec("perl $ui");
-    }
+my $pid = fork();
+if( $pid == 0) { 
+	# child displays UI
+	exec( "perl $ui" );
 }
+
 
 ##################################################
 # all actual Debugger code is within package DB
@@ -42,10 +39,9 @@ use strict;
 ##################################################
 
 use Data::Dumper;
-use PadWalker   qw(peek_my peek_our peek_sub closed_over);
-use Cwd         qw(getcwd);
+use PadWalker qw(peek_my peek_our peek_sub closed_over);
+use Cwd qw(getcwd);
 use File::Slurp qw(slurp write_file);
-use File::Basename;
 
 # shared lib for IPC between debugger and UI
 use Devel::dipc;
@@ -54,49 +50,49 @@ use Devel::dipc;
 # Debugger globals
 ##################################################
 
-my $skip        = 1;     # skip tracing functions
-my $stepout     = 0;     # step out of function and resume debugger
-my $stepover    = 0;     # step over flag
-my $depth       = 0;     # depth of call chain
-my $breakout    = 0;     # leave gtk loop to return to debugger
-my $currentFile = "";    # the current file of debugging
-my $currentLine = 0;     # the current line being debugged
-my $started     = 0;     # debugging has started
+my $skip = 1;          # skip tracing functions
+my $stepout = 0;       # step out of function and resume debugger
+my $stepover = 0;      # step over flag
+my $depth = 0;         # depth of call chain
+my $breakout = 0;      # leave gtk loop to return to debugger
+my $currentFile = "";  # the current file of debugging
+my $currentLine = 0;   # the current line being debugged
+my $started = 0;       # debugging has started
 
 ##################################################
 # caches
 ##################################################
 
-my %breakpoints;         # remember breakpoint markers so we can delete 'em
-my $lexicals;            # caches current lexicals (for eval)
-my %files;               # map abs path -> filename as seen by debugger
-my %postpone;            # postponed break points
+my %breakpoints;	   # remember breakpoint markers so we can delete 'em
+my $lexicals;		   # caches current lexicals (for eval)
+my %files;			   # map abs path -> filename as seen by debugger
+my %postpone;          # postponed break points
 
 ##################################################
 ##################################################
 
 # INT signal handler
 sub dbint_handler {
-    $DB::single = 1;
-
-    # print "signalled\n" ;
+  $DB::single = 1 ;
+  # print "signalled\n" ;
 }
 
-$SIG{'INT'} = "DB::dbint_handler";
+$SIG{'INT'} = "DB::dbint_handler" ;
 
 ##################################################
 # initialize
 ##################################################
+
 
 my $fifo = Devel::dipc->new();
 
 $fifo->open_out("/tmp/perl_debugger_finfo_out");
 
 # send current working dir to UI
-$fifo->write( "cwd " . getcwd() );
+$fifo->write("cwd ".getcwd());
 
 # send PID of current process to UI
-$fifo->write( "pid " . $$ );
+$fifo->write("pid ".$$);
 
 $fifo->open_in("/tmp/perl_debugger_finfo_in");
 
@@ -111,87 +107,54 @@ $DB::trace = 1;
 
 sub find_file {
 
-    my $file = shift;
-    my $inc  = shift;
-    if ( !$inc ) {
-        $inc = \@INC;
-    }
+	my $file = shift;
+	my $inc = shift;
+	if(!$inc) {
+		$inc = \@INC;
+	}
 
-    if ( $file =~ /^\// ) {
-        return $file;
-    }
+	if( $file =~ /^\//) {
+		return $file;
+	}
 
-    foreach my $i (@$inc) {
-        if ( -e "$i/$file" ) {
-            return "$i/$file";
-        }
-    }
+	foreach my $i ( @$inc ) {
+		if( -e "$i/$file" ) {
+			return "$i/$file";
+		}
+	}
 
-    if ( -e getcwd() . "/$file" ) {
-        return getcwd() . "/$file";
-    }
-    return $file;
-}
-
-sub find_module {
-
-    my $fun = shift;
-    my $inc  = shift;
-
-    if ( !$inc ) {
-        $inc = \@INC;
-    }
-
-	$fun =~ s/::/\//g;
-	my $module = dirname($fun);
-
-    foreach my $i (@$inc) {
-        if ( -e "$i/$module.pm" ) {
-            return "$i/$module.pm";
-        }
-    }
-    foreach my $i (@$inc) {
-        if ( -e "$i/$module.pl" ) {
-            return "$i/$module.pl";
-        }
-    }
-
-    if ( -e getcwd() . "/$module.pm" ) {
-        return getcwd() . "/$module.pm";
-    }
-
-    if ( -e getcwd() . "/$module.pl" ) {
-        return getcwd() . "/$module.pl";
-    }
-
-    return $fun;
+	if( -e getcwd()."/$file" ) {
+		return getcwd()."/$file";
+	}
+	return $file;
 }
 
 sub restoreBreakpoints {
 
-    if ( -e ".pgdbbrkpts" ) {
-        my @lines = slurp(".pgdbbrkpts");
-        foreach my $line (@lines) {
-            if ( $line =~ /^([^:]+):([0-9]+)/ ) {
-                my $file = $1;
-                my $line = $2;
-                if ( $postpone{$file} ) {
-                    $postpone{$file} = [];
-                }
-                push @{ $postpone{$file} }, $line;
-            }
-        }
-    }
+	if(-e ".pgdbbrkpts") {
+		my @lines = slurp(".pgdbbrkpts");
+		foreach my $line ( @lines) {
+			if( $line =~ /^([^:]+):([0-9]+)/ ) {
+				my $file = $1;
+				my $line = $2;
+				if($postpone{$file}) {
+					$postpone{$file} = [];
+				}
+				push @{$postpone{$file}}, $line;
+			}
+		}
+	}
 }
 
-sub dumpBreakpoints {
+sub	dumpBreakpoints {
 
-    my @a;
-    foreach my $key ( keys %breakpoints ) {
-        push @a, $key . "\n";
-    }
-    write_file( ".pgdbbrkpts", @a );
+	my @a;
+	foreach my $key ( keys %breakpoints) {
+		push @a, $key."\n";
+	}
+	write_file(".pgdbbrkpts",@a);
 }
+
 
 ##################################################
 # logic
@@ -199,103 +162,103 @@ sub dumpBreakpoints {
 
 # set a breakpoint
 sub setBreakpoint {
-    my $abspath = shift;
-    my $line    = shift;
+  my $abspath = shift;
+  my $line = shift;
 
-    my $filename = $files{$abspath};
-    if ( !$filename ) {
-        $filename = $abspath;
-    }
+  my $filename = $files{$abspath};
+  if( !$filename ) {
+	$filename = $abspath;
+  }
 
-    my $bpn = $abspath . ":" . $line;
-    if ( $breakpoints{$bpn} ) {    # breakpoint already exists, remove it
+  my $bpn =  $abspath.":".$line;
+  if($breakpoints{$bpn}) { # breakpoint already exists, remove it
 
-        # check file is already loaded by perl
-        if ( hasdblines($filename) ) {
+	 # check file is already loaded by perl
+    if( hasdblines($filename) ) {
+		
+		setdbline($filename,$line,0);
+		delete $breakpoints{$bpn};
+	}
+	else { # should never happen?
+		delete $breakpoints{$bpn};
+	}
+  }
+  else {
 
-            setdbline( $filename, $line, 0 );
-            delete $breakpoints{$bpn};
-        }
-        else {    # should never happen?
-            delete $breakpoints{$bpn};
-        }
-    }
-    else {
-
-        # check if file is already loaded by perl
-        if ( hasdblines($filename) ) {
-
-            # set a new breakpoint on this resp. the next breakable line, if any
-            my $l = $line;
-            while ( !checkdbline( $filename, $l ) ) { $l++; }
-            $breakpoints{$bpn} = 1;
-            setdbline( $filename, $l, 1 );
-            $fifo->write("marker $abspath,$line");
-        }
-        else {
-
-            # check if this is an existing postponed breakpoint
-            if ( !$postpone{$abspath} ) {
-                $postpone{$abspath} = [];
-            }
-            my $exists = 0;
-            my @ps;    # all items from postponed array but $line
-            foreach my $p ( @{ $postpone{$abspath} } ) {
-                if ( $p == $line ) {
-                    $exists = 1;
-                }
-                else {
-                    push @ps, $p;
-                }
-            }
-            if ($exists) {
-
-                # postponed breakpoint exists, remove
-                $postpone{$abspath} = \@ps;
-            }
-            else {
-                # set a new postponed breakpoint
-                push @{ $postpone{$abspath} }, $line;
-                $fifo->write("marker $abspath,$line");
-            }
-        }
-    }
+	 # check if file is already loaded by perl
+    if( hasdblines($filename) ) { 
+		
+		# set a new breakpoint on this resp. the next breakable line, if any
+		my $l = $line;
+		while(!checkdbline($filename,$l)) { $l++;  };
+		$breakpoints{$bpn} = 1;
+		setdbline($filename,$l,1);
+		$fifo->write("marker $abspath,$line");
+	}
+	else {
+		
+		# check if this is an existing postponed breakpoint
+		if(!$postpone{$abspath}) {
+			$postpone{$abspath} = [];
+		}
+		my $exists = 0;
+		my @ps; # all items from postponed array but $line
+		foreach my $p ( @{$postpone{$abspath}} ) {
+			if( $p == $line ) {
+				$exists = 1;
+			}
+			else {
+				push @ps, $p;
+			}
+		}
+		if($exists) {
+			# postponed breakpoint exists, remove
+			$postpone{$abspath} = \@ps;
+		}
+		else {
+			# set a new postponed breakpoint
+			push @{$postpone{$abspath}}, $line;
+			$fifo->write("marker $abspath,$line");
+		}
+	}
+  }
 }
+
 
 # update the info with current lexicals and call frame stack
 sub updateInfo {
 
-    my ( $package, $filename, $line ) = @_;
+    my ($package, $filename, $line) = @_;
 
-    my $abspath = find_file($filename);
+	my $abspath = find_file($filename);
 
-    my $info = "# callstack:\n";
-    for ( my $i = 1 ; $i < 25 ; $i++ ) {
-        my ( $p2, $fn2, $ln2, $fun2 ) = caller $i + 1;
-        if ( !$p2 ) { last; }
-        $info .= "$fun2() [$p2]\n";
-    }
+	my $info = "# callstack:\n";
+	for (my$i=1; $i<25; $i++) {
+	    my ( $p2, $fn2, $ln2, $fun2) = caller $i+1;
+		if(!$p2) {last;}
+		$info .= "$fun2() [$p2]\n";
+	}
 
-    my $msg = $abspath . "," . $line . "," . $info;
+	my $msg = $abspath.",".$line.",".$info;
 
-    $fifo->write("info $msg");
+	$fifo->write("info $msg");
 }
 
 # show lexicals
 sub showLexicals {
 
-    my ( $filename, $line ) = @_;
+    my ($filename, $line) = @_;
 
-    my $abspath = $filename;
+	my $abspath = $filename;
 
-    my $h = peek_my(3);
-    $lexicals = $h;
-    my $info = "# lexicals:\n" . Dumper($h);
-    $info =~ s/    / /gm;
+    my $h = peek_my (3);
+	$lexicals = $h;
+    my $info = "# lexicals:\n".Dumper($h);
+	$info =~ s/    / /gm;
 
-    my $msg = $abspath . "," . $line . "," . $info;
+	my $msg = $abspath.",".$line.",".$info;
 
-    $fifo->write("lexicals $msg");
+	$fifo->write("lexicals $msg");
 }
 
 ##################################################
@@ -304,103 +267,93 @@ sub showLexicals {
 
 # set a breakpoint
 sub setdbline {
-    my ( $fname, $lineno, $value ) = @_;
+  my ($fname, $lineno, $value) = @_ ;
 
-    # print "# set break at $fname:$lineno\n";
-    local (*dbline) = $main::{ '_<' . $fname };
+  # print "# set break at $fname:$lineno\n";
+  local(*dbline) = $main::{'_<' . $fname};
 
-    no strict;
-    $dbline{$lineno} = $value;
-}
+  no strict;
+  $dbline{$lineno} = $value ;
+} 
 
 # get a breakpoint
 sub getdbline {
-    my ( $fname, $lineno ) = @_;
-    local (*dbline) = $main::{ '_<' . $fname };
-    no strict;
-    return $dbline{$lineno};
-}
+  my ($fname, $lineno) = @_ ;
+  local(*dbline) = $main::{'_<' . $fname};
+  no strict;
+  return $dbline{$lineno} ;
+} 
 
 # get source line
 sub getdbsrc {
-    my ( $fname, $lineno ) = @_;
-    local (*dbline) = $main::{ '_<' . $fname };
-    no strict;
-    return $dbline[$lineno];
+  my ($fname, $lineno) = @_ ;
+  local(*dbline) = $main::{'_<' . $fname};
+  no strict;
+  return $dbline[$lineno] ;
 }
 
 # get full sources for a debugged file
 sub dbdumpsrc {
-    my ($fname) = @_;
-    my $r = "";
-    local (*dbline) = $main::{ '_<' . $fname };
+  my ($fname) = @_ ;
+  my $r = "";
+  local(*dbline) = $main::{'_<' . $fname};
 
-    no strict;
-    my $first = 1;
-    foreach my $line (@dbline) {
-        if ($line) {
-            $r .= $line;
-            if ($first) {
+  no strict;
+  my $first = 1;
+  foreach my $line ( @dbline ) {
+	if($line) {
+		$r .= $line;
+		if($first) {
 
-                $r =~ s/use Devel::gdbg;\n//gm;
-            }
-            $first = 0;
-        }
-    }
-    return $r;
+			$r =~ s/use Devel::gdbg;\n//gm;
+		}
+		$first = 0;
+	}
+  }
+  return $r;
 }
 
 # check if file is already loaded by perl
 sub hasdblines {
-    my ($fname) = @_;
-    if ( exists $main::{ '_<' . $fname } ) { return 1; }
-    return 0;
+  my ($fname) = @_;
+  if( exists $main::{'_<' . $fname}) { return 1; }
+  return 0;
 }
 
 # check if a line is breakable
-sub checkdbline($$) {
-    my ( $fname, $lineno ) = @_;
+sub checkdbline($$) { 
+  my ($fname, $lineno) = @_ ;
 
-    return 0 unless $fname;    # we're getting an undef here on 'Restart...'
+  return 0 unless $fname; # we're getting an undef here on 'Restart...'
 
-    local ($^W)     = 0;                          # spares us warnings under -w
-    local (*dbline) = $main::{ '_<' . $fname };
+  local($^W) = 0 ; # spares us warnings under -w
+  local(*dbline) = $main::{'_<' . $fname} ;
 
-    no strict;
-    my $flag = $dbline[$lineno] != 0;
+  no strict;
+  my $flag = $dbline[$lineno] != 0 ;
 
-    return $flag;
-
-}
+  return $flag;
+  
+} 
 
 # helper to set a breakpoint for a subroutine
 sub brkonsub {
 
-    my ($name) = shift;
+  my($name) = shift;
+  
+  if( !exists $DB::sub{$name} ) {
+      print "No subroutine $name.  Try main::$name\n" ;
+      return;
+  }
 
-    if ( !exists $DB::sub{$name} ) {
-        print "No subroutine $name.  Try main::$name\n";
-        return;
-    }
-
-    # file name will be in $1, start line $2, end line $3
-    $DB::sub{$name} =~ /(.*):([0-9]+)-([0-9]+)$/o;
-    for ( $2 .. $3 ) {
-        next unless &checkdbline( $1, $_ );
-        setdbline( $1, $_, 1 );
-		return $_;
-        last;
-    }
-	return -1;
-}
-
-sub getSubs {
-
-	my @subs = keys %DB::sub;
-	my @sorted = sort @subs;
-	my $result = join("\n", @sorted);
-	return $result;
-}
+  # file name will be in $1, start line $2, end line $3
+  $DB::sub{$name} =~ /(.*):([0-9]+)-([0-9]+)$/o ; 
+  for( $2..$3 ) {
+    next unless &checkdbline($1, $_) ;
+    setdbline($1,$_,1);
+    last ;
+  }
+} 
 
 ##################################################
 # messages from ui
@@ -408,88 +361,75 @@ sub getSubs {
 
 sub process_msg {
 
-    my $msg = shift;
+	my $msg = shift;
 
-    # print "MSG: $msg\n";
+	# print "MSG: $msg\n";
 
-    if ( $msg eq "s" ) {    # single step
+	if($msg eq "s") {
 
-        $breakout   = 1;
-        $DB::single = 1;
-    }
-    elsif ( $msg eq "q" ) {    # quit
-        dumpBreakpoints();
-        $fifo->close();
-        POSIX::_exit(0);
-    }
-    elsif ( $msg eq "l" ) {    # show lexicals
-        showLexicals( $currentFile, $currentLine );
-    }
-    elsif ( $msg eq "c" ) {    # continue
+		$breakout = 1;
+		$DB::single = 1;
+	}
+	elsif($msg eq "q") {
+		dumpBreakpoints();
+		$fifo->close();
+		POSIX::_exit(0);
+	}
+	elsif($msg eq "l") {
+		showLexicals($currentFile,$currentLine);
+	}
+	elsif($msg eq "c") {
 
-        $breakout   = 1;
-        $DB::single = 0;
-    }
-    elsif ( $msg eq "n" ) {    # step oover
+		$breakout = 1;
+		$DB::single = 0;
+	}
+	elsif($msg eq "n") {
 
-        $breakout   = 1;
-        $DB::single = 0;
-        $stepover   = $depth + 1;
-    }
-    elsif ( $msg eq "r" ) {    # step out of current function
+		$breakout = 1;
+		$DB::single = 0;
+		$stepover = $depth+1;
+	}
+	elsif($msg eq "r") {
 
-        if ( $depth > 0 ) {
-            $breakout   = 1;
-            $stepout    = 1;
-            $DB::single = 0;
-        }
-        else {
-            $breakout   = 1;
-            $DB::single = 0;
-            $stepover   = $depth + 1;
-        }
-    }
-    elsif ( $msg =~ /e (.*)/ ) {    # eval-uate code at current pos
+		if($depth>0) {
+			$breakout = 1;
+			$stepout = 1;
+			$DB::single = 0;
+		} else {
+			$breakout = 1;
+			$DB::single = 0;
+			$stepover = $depth+1;
+		}
+	}
+	elsif($msg =~ /e (.*)/ ) {
 
-        my $r = eval($1);
-        if ($@) {
-            $r = $@;
-        }
-        $fifo->write("eval $r");
-    }
-    elsif ( $msg =~ /b ([^,]+),([0-9]+)/ ) {    # set breakpoint
+		my $r = eval($1);
+		if($@)
+		{
+			$r = $@;
+		}
+		$fifo->write("eval $r");
+	}
+	elsif($msg =~ /b ([^,]+),([0-9]+)/ ) {
 
-        my $file = $1;
-        my $line = $2;
-        setBreakpoint( $file, $line );
-    }
-    elsif ( $msg =~ /fb (.*)/ ) {    # set breakpoint at fun
+		my $file = $1;
+		my $line = $2;
+		setBreakpoint($file,$line);
+	}
+	elsif($msg eq "p" ) {
 
-        my $fun = $1;
-		my $file = find_module($fun);
-		my $line = brkonsub($fun);
-		$fifo->write("file $file,$line");
-		$fifo->write("marker $file,$line");
-		$breakpoints{"$file:$line"} = 1;
-    }
-    elsif ( $msg eq "p" ) {                     # dump brakpoint info
-
-        my $data = "# set breakpoints:\n";
-        foreach my $bp ( keys %breakpoints ) {
-            $data .= $bp . "\n";
-        }
-        $data .= "\n# postponed breakpoints\n";
-        foreach my $key ( keys %postpone ) {
-            my $p = $postpone{$key};
-            foreach my $line (@$p) {
-                $data .= $key . "." . $line . "\n";
-            }
-        }
-        $fifo->write( "lexicals $currentFile,$currentLine," . $data );
-    }
-	elsif ( $msg eq "f" ) {
-		my $subs = getSubs();
-		$fifo->write("subs $subs");
+		my $data = "# set breakpoints:\n";
+		foreach my $bp (keys %breakpoints) {
+			$data .= $bp."\n";
+		}
+		$data .= "\n# postponed breakpoints\n";
+		foreach my $key (keys %postpone) {
+			my $p = $postpone{$key};
+			foreach my $line ( @$p ) {
+				$data .= $key.".".$line."\n";
+			}
+		}
+		$fifo->write("lexicals $currentFile,$currentLine,".$data);
 	}
 }
 
@@ -501,200 +441,194 @@ sub process_msg {
 
 sub DB {
 
-    my ( $package, $filename, $line ) = caller;
-    my ( $p, $fn, $ln, $fun ) = caller 1;
+  my ($package, $filename, $line) = caller;
+  my ( $p, $fn, $ln, $fun) = caller 1;
 
-    my $abspath    = find_file($filename);
-    my $isBrkPoint = getdbline( $filename, $line );
+  my $abspath = find_file($filename);
+  my $isBrkPoint = getdbline($filename,$line);
 
-    $currentLine = $line;
+  $currentLine = $line;
 
-    # always skip over ourselves
-    if ( $fun && $fun =~ /^Devel::/ ) {
-        return;
-    }
+  # always skip over ourselves
+  if( $fun && $fun =~ /^Devel::/ ) { 
+	return;
+  }
 
-    # print "SINGLE:".$DB::single."/".$isBrkPoint." $filename:$line $abspath\n";
+  # print "SINGLE:".$DB::single."/".$isBrkPoint." $filename:$line $abspath\n";
 
-    # allow function tracing. see DB::sub below
-    $skip = 0;
+  # allow function tracing. see DB::sub below
+  $skip=0;
 
-    # check if we are done stepping over a line
-    if ( $depth < $stepover ) {
-        $stepover   = 0;
-        $DB::single = 1;
-    }
+  # check if we are done stepping over a line
+  if($depth < $stepover ) {
+	$stepover = 0;
+	$DB::single = 1;
+  }
 
-    if ($isBrkPoint) {
-        $DB::single = 1;    # set debugger to single step
-    }
+  if($isBrkPoint) {
+    $DB::single = 1; # set debugger to single step
+  }
 
-    # if we are single stepping, update the UI
-    if ($DB::single) {
+  # if we are single stepping, update the UI
+  if($DB::single) {
 
-        $started = 1;
+    $started = 1;
 
-        # special handling for eval "" code
-        if ( $filename =~ /\(eval / ) {
+	# special handling for eval "" code
+	if($filename =~ /\(eval /) {
 
-            my $src = dbdumpsrc($filename);
-            $files{$filename} = $filename;
-            $fifo->write("load $filename,$src");
-            $abspath = $filename;
-        }
+		my $src = dbdumpsrc($filename);
+		$files{$filename} = $filename;
+		$fifo->write("load $filename,$src");
+		$abspath = $filename;
+	}
 
-        # move UI to current file:line
-        $fifo->write("file $abspath,$line");
+	# move UI to current file:line
+	$fifo->write("file $abspath,$line");
 
-        if ( $currentFile ne $filename ) {
+	if($currentFile ne $filename) {
 
-            # file being debugged has changed
-            # update the displayed file
-            $currentFile = $filename;
-        }
+		# file being debugged has changed
+		# update the displayed file
+		$currentFile = $filename;
+	}
 
-        # update the info pane call frame stack
-        updateInfo( $package, $filename, $line );
+	# update the info pane call frame stack
+	updateInfo($package,$filename,$line);
 
-        # run the message loop now until users
-        # invokes an action that breaks the debugger
+	# run the message loop now until users 
+	# invokes an action that breaks the debugger
 
-        $skip = 1;    # diable function tracing
+	$skip=1; # diable function tracing
 
-        # pump messages from UI
-        while ( !$breakout ) {
+	# pump messages from UI
+	while(!$breakout) {
 
-            my @msgs = $fifo->read( \&process_msg );
-            foreach my $msg (@msgs) {
-                process_msg($msg);
-            }
-        }
-        $breakout = 0;
+		my @msgs = $fifo->read( \&process_msg);
+		foreach my $msg (@msgs) {
+			process_msg($msg);
+		}
+	}
+	$breakout = 0;
 
-        $skip = 0;    # re-enable function tracing
-    }
+	$skip=0; # re-enable function tracing 
+  }
 }
 
 # called from Perl when entering a function to trace function calls
 
 sub sub {
 
-    if ($skip) {    # if skip flag is set skip any tracing
-        no strict;
-        return &$sub;
-    }
+  if($skip) { # if skip flag is set skip any tracing
+	no strict;
+    return &$sub;
+  }
 
+  no strict;
+  if($sub =~ /^Devel::/ ) { # never trace the Devel:: stuff
+	return &$sub;
+  }
+  use strict;
+
+  # increase depth counter
+  $depth++;
+
+  # following depends on function context (list,scalar,void)
+  
+  if(wantarray) { # array ctx
     no strict;
-    if ( $sub =~ /^Devel::/ ) {    # never trace the Devel:: stuff
-        return &$sub;
+	# actually call the function
+    my @r = &$sub;
+	use strict;
+    if($stepout) {
+	  # if stepout flag was set,
+	  # switch back to single stepping
+	  # right after the function call
+      $stepout = 0;
+      $DB::single = 1;
     }
-    use strict;
+	$depth--;
+    return @r;
+  }
+  elsif(defined wantarray) { # scalar ctx
 
-    # increase depth counter
-    $depth++;
-
-    # following depends on function context (list,scalar,void)
-
-    if (wantarray) {               # array ctx
-        no strict;
-
-        # actually call the function
-        my @r = &$sub;
-        use strict;
-        if ($stepout) {
-
-            # if stepout flag was set,
-            # switch back to single stepping
-            # right after the function call
-            $stepout    = 0;
-            $DB::single = 1;
-        }
-        $depth--;
-        return @r;
+    no strict;  
+	# actually call the function
+    my $r = &$sub;
+	use strict;
+    if($stepout) {
+	  # if stepout flag was set,
+	  # switch back to single stepping
+	  # right after the function call
+      $stepout = 0;
+      $DB::single = 1;
     }
-    elsif ( defined wantarray ) {    # scalar ctx
-
-        no strict;
-
-        # actually call the function
-        my $r = &$sub;
-        use strict;
-        if ($stepout) {
-
-            # if stepout flag was set,
-            # switch back to single stepping
-            # right after the function call
-            $stepout    = 0;
-            $DB::single = 1;
-        }
-        $depth--;
-        return $r;
-    }
-    else {    # void ctx
-        no strict;
-
-        # actually call the function
-        &$sub;
-        use strict;
-        if ($stepout) {
-
-            # if stepout flag was set,
-            # switch back to single stepping
-            # right after the function call
-            $stepout    = 0;
-            $DB::single = 1;
-        }
-        $depth--;
-    }
+	$depth--;
+    return $r;
+  }
+  else { # void ctx
+    no strict;
+	# actually call the function
+    &$sub;
+	use strict;
+    if($stepout) {
+	  # if stepout flag was set,
+	  # switch back to single stepping
+	  # right after the function call
+      $stepout = 0;
+      $DB::single = 1;
+    }    
+	$depth--;
+  }
 }
 
 # called from Perl in debug mode, once files have been loaded
 sub postponed {
 
-    $skip = 1;    # disable function tracing
+	$skip=1; # disable function tracing
 
-    my $id = shift;
-    $id =~ /::_<(.*)/;
-    my $file = $1;
+	my $id = shift;
+	$id =~ /::_<(.*)/;
+	my $file = $1;
 
-    my $abspath = find_file($file);
-    $files{$abspath} = $file;
+	my $abspath = find_file($file);
+	$files{$abspath} = $file;
 
-    # print "LOAD: $file -> $abspath\n";
+	# print "LOAD: $file -> $abspath\n";
 
-    if ( $file !~ /Devel\/gdbg.pm$/ ) {    # do not trace ourselves
+	if($file !~ /Devel\/gdbg.pm$/) { # do not trace ourselves
 
-        # send source for file to UI
-        my $src = dbdumpsrc($file);
-        $fifo->write("load $abspath,$src");
+		# send source for file to UI
+	    my $src = dbdumpsrc($file);
+		$fifo->write("load $abspath,$src");
 
-        # check if we have postponed breakpoints
-        if ( $postpone{$abspath} ) {
+		# check if we have postponed breakpoints
+		if($postpone{$abspath}) {
 
-            my $pp = $postpone{$abspath};
-            foreach my $p (@$pp) {
+			my $pp = $postpone{$abspath};
+			foreach my $p (@$pp) {
 
-                # find breakpoint and update the UI
-                my $l = $p;
-                while ( !checkdbline( $file, $l ) ) { $l++; }
-                my $bpn = $abspath . ":" . $l;
-                $breakpoints{$bpn} = 1;
-                setdbline( $file, $l, 1 );
-                $fifo->write("marker $abspath,$l");
-            }
-            $postpone{$abspath} = [];
-        }
+				# find breakpoint and update the UI
+				my $l = $p;
+				while(!checkdbline($file,$l)) { $l++;  };
+   			    my $bpn = $abspath.":".$l;
+				$breakpoints{$bpn} = 1;
+				setdbline($file,$l,1);
+				$fifo->write("marker $abspath,$l");
+			}
+			$postpone{$abspath} = [];
+		}
 
-        # for files loaded at runtime (eg require)
-        # break into the Debugger on initial load
-        if ($started) {
+		# for files loaded at runtime (eg require)
+		# break into the Debugger on initial load
+		if($started) {
+			#$DB::single = 1;
+		}
+	}
 
-            #$DB::single = 1; # we no longer do this?
-        }
-    }
-
-    $skip = 0;    # re-enable function tracing
+	$skip=0; # re-enable function tracing
 }
+
 
 ##################################################
 # over and out
@@ -702,60 +636,60 @@ sub postponed {
 
 END {
 
-    $skip       = 1;
-    $DB::single = 0;
-    $DB::trace  = 0;
+	$skip=1;
+	$DB::single = 0;
+	$DB::trace = 0;
 
-    dumpBreakpoints();
+	dumpBreakpoints();
 
-    $fifo->write("quit");
-
-    POSIX::_exit(0);
-    $skip = 0;
+	$fifo->write("quit");
+	
+	POSIX::_exit(0);
+	$skip=0;
 }
 
 1;
+
 
 __END__
 # Below is stub documentation for your module. You'd better edit it!
 
 =head1 NAME
 
-Devel::gdbg - Perl Debugger using Gtk on Linux
+Devel::gdbg - Perl extension for blah blah blah
 
 =head1 SYNOPSIS
 
-> perl -d:gdbg yourscript.pl
+  use Devel::gdbg;
+  blah blah blah
 
 =head1 DESCRIPTION
 
-Implements a simple visual GTK based debugger for perl scripts.
+Stub documentation for Devel::gdbg, created by h2xs. It looks like the
+author of the extension was negligent enough to leave the stub
+unedited.
 
-By default invoking the debugger will fork a UI process.
-Prevent this with setting ENV variable GDBG_NO_FORK, in which
-case it is needed to start the UI backend manualle beforehand
-using:
-
-> /usr/local/share/perl/5.34.0/Devel/gbdgui.pl
-
-(or wherever you installed Devel::gbgb)
-
-and then start the to be debugged program like so:
-
-> GDBG_NO_FORK=1 perl -d:gdbg yourscript.pl
-
+Blah blah blah.
 
 
 =head1 SEE ALSO
 
+Mention other useful documentation such as the documentation of
+related modules or operating system documentation (such as man pages
+in UNIX), or any relevant external documentation such as RFCs or
+standards.
+
+If you have a mailing list set up for your module, mention it here.
+
+If you have a web site set up for your module, mention it here.
 
 =head1 AUTHOR
 
-littlemole@oha7.org
+mike, E<lt>mike@E<gt>
 
 =head1 COPYRIGHT AND LICENSE
 
-Copyright (C) 2024 by littlemole
+Copyright (C) 2024 by mike
 
 This library is free software; you can redistribute it and/or modify
 it under the same terms as Perl itself, either Perl version 5.34.0 or,
