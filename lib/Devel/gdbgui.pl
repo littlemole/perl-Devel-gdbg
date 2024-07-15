@@ -173,6 +173,11 @@ sub onBreakpoints {
     $fifo->write("p");
 }
 
+sub onSubs {
+
+    $fifo->write("f");
+}
+
 # user selected theme from Themes menu
 sub onTheme {
     my ($menuItem) = @_;
@@ -343,6 +348,12 @@ sub process_msg {
 
         my $evaled = $1;
         $lexicalsBuffer->set_text( $evaled, -1 );
+        $widgets{sourceView}->set_buffer($lexicalsBuffer);
+    }
+    elsif ( $msg =~ /^subs (.*)/s ) {
+
+        my $subs = $1;
+        $lexicalsBuffer->set_text( $subs, -1 );
         $widgets{sourceView}->set_buffer($lexicalsBuffer);
     }
 }

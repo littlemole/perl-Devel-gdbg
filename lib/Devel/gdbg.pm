@@ -357,6 +357,14 @@ sub brkonsub {
     }
 }
 
+sub getSubs {
+
+	my @subs = keys %DB::sub;
+	my @sorted = sort @subs;
+	my $result = join("\n", @sorted);
+	return $result;
+}
+
 ##################################################
 # messages from ui
 ##################################################
@@ -433,6 +441,10 @@ sub process_msg {
         }
         $fifo->write( "lexicals $currentFile,$currentLine," . $data );
     }
+	elsif ( $msg eq "f" ) {
+		my $subs = getSubs();
+		$fifo->write("subs $subs");
+	}
 }
 
 ##################################################
