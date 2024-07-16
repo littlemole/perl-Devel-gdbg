@@ -100,6 +100,15 @@
                         <signal name="activate" handler="onBreakpoints" swapped="no"/>
                       </object>
                     </child>
+                    <child>
+                      <object class="GtkMenuItem" id="showSubsMenu">
+                        <property name="visible">True</property>
+                        <property name="can-focus">False</property>
+                        <property name="label" translatable="yes">Show Subroutines</property>
+                        <property name="use-underline">True</property>
+                        <signal name="activate" handler="onSubs" swapped="no"/>
+                      </object>
+                    </child>
                   </object>
                 </child>
               </object>
