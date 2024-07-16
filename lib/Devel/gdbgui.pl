@@ -160,7 +160,7 @@ sub onOpen {
 # user selected 'Goto current line' from File Menu
 sub onScroll {
 
-    scroll($currentLine);
+    scroll($currentFile,$currentLine);
 }
 
 # user selected 'Show Lexicals' from file menu
@@ -208,22 +208,6 @@ sub onWindow {
 	$widgets{statusBar}->set_tooltip_text($label);
 }
 
-sub getLine {
-	my $iter = shift;
-	my $buffer = shift;
-	my $line = shift;
-
-	my $count = $buffer->get_line_count();
-	my $endIter = $buffer->get_iter_at_line($line);
-	if($line-1 >= $count) {
-		$endIter = $buffer->get_end_iter();
-	}
-	my $text = $buffer->get_text($iter,$endIter,1);
-	chomp($text);
-
-	return $text;
-}
-
 # set a breakpoint UI handler (click on marker of sourceView)
 sub onMarker {
     my ( $self, $iter, $event ) = @_;
@@ -241,12 +225,10 @@ sub onMarker {
 		my $text = getLine($iter,$breakpointsBuffer,$line);
 		if(!$text) { return; }
 		if ( $text =~ /^#/) { return; }
-		if ($text =~ s/([^:]+):([0-9]+)/,/ ) {
-			print "$text\n";
+		if ($text =~ /([^:]+):([0-9]+)/ ) {
 			my $file = $1;
 			my $line = $2;
-			openFile($file,$line);
-			scroll($line);
+			scroll($file,$line);
 		}
 		return;
 	}
@@ -335,12 +317,7 @@ sub process_msg {
         $widgets{statusBar}->set_text(basename($file).":$line");
 		$widgets{statusBar}->set_tooltip_text($file);
 
-        openFile( $file, $line );
-
-        while ( $ctx->pending() ) {
-            $ctx->iteration(0);
-        }
-        scroll($line);
+        scroll($file,$line);
         enableButtons(1);		
     }
     elsif ( $msg =~ /^info ([^,]+),([0-9]*),(.*)/s ) {
@@ -380,15 +357,28 @@ sub process_msg {
 	    my $buf = $sourceBuffers{$file};
         if ($buf) {
             my $iter = $buf->get_iter_at_line( $line - 1 );
-            if ( $breakpoints{$bpn} ) {    # already exists
-
-                #				$sourceBuffers{$file}->delete_mark($breakpoints{$bpn});
-                #				delete $breakpoints{$bpn};
-            }
-            else {
+            if ( !$breakpoints{$bpn} ) { # only if not exists
                 my $mark = $sourceBuffers{$file}
                   ->create_source_mark( $bpn, "error", $iter );
                 $breakpoints{$bpn} = $mark;
+            }
+        }
+
+    }
+    elsif ( $msg =~ /^rmarker ([^,]+),([0-9]*)/ ) {
+
+        my $file = $1;
+        my $line = $2;
+
+        my $bpn = $file . ":" . $line;
+    
+	    my $buf = $sourceBuffers{$file};
+        if ($buf) {
+            my $iter = $buf->get_iter_at_line( $line - 1 );
+            if ( $breakpoints{$bpn} ) {    # only if already exists
+
+                $sourceBuffers{$file}->delete_mark($breakpoints{$bpn});
+                delete $breakpoints{$bpn};
             }
         }
 
@@ -464,28 +454,26 @@ sub openFile {
     $widgets{windowMenu}->show_all();
 }
 
-sub setMarker {
-    my $filename = shift;
-    my $line     = shift;
-
-    my $iter = $sourceBuffers{$filename}->get_iter_at_line( $line - 1 );
-
-    my $bpn = $filename . ":" . $line;
-    if ( $breakpoints{$bpn} ) {    # breakpoint already exists, remove it
-        $sourceBuffers{$filename}->delete_mark( $breakpoints{$bpn} );
-        delete $breakpoints{$bpn};
-    }
-    else {
-
-        my $mark =
-          $sourceBuffers{$filename}->create_source_mark( $bpn, "error", $iter );
-        $breakpoints{$bpn} = $mark;
-    }
-}
 
 ##################################################
 # UI helpers
 ##################################################
+
+sub getLine {
+	my $iter = shift;
+	my $buffer = shift;
+	my $line = shift;
+
+	my $count = $buffer->get_line_count();
+	my $endIter = $buffer->get_iter_at_line($line);
+	if($line-1 >= $count) {
+		$endIter = $buffer->get_end_iter();
+	}
+	my $text = $buffer->get_text($iter,$endIter,1);
+	chomp($text);
+
+	return $text;
+}
 
 sub enableButtons {
 
@@ -504,7 +492,7 @@ sub enableButtons {
     $widgets{buttonStop}->set_sensitive( $state ? 0 : 1 );
 }
 
-# update the info with current lexicals and call frame stack
+# update the info with current call frame stack
 sub updateInfo {
 
     my ( $filename, $line, $info ) = @_;
@@ -515,17 +503,18 @@ sub updateInfo {
 }
 
 sub scroll {
+	my $file = shift;
     my $line = shift;
 
-    openFile( $currentFile, $currentLine );
+    openFile( $file, $line );
 
     while ( $ctx->pending() ) {
         $ctx->iteration(0);
     }
 
     # scroll to currently debugged line
-    my $iter = $sourceBuffers{$currentFile}->get_iter_at_line( $line - 1 );
-    $sourceBuffers{$currentFile}->place_cursor($iter);
+    my $iter = $sourceBuffers{$file}->get_iter_at_line( $line - 1 );
+    $sourceBuffers{$file}->place_cursor($iter);
     $widgets{sourceView}->scroll_to_iter( $iter, 0, 1, 0, 0.5 );
 
     while ( $ctx->pending() ) {
@@ -607,7 +596,6 @@ sub build_ui {
     $lexicalsBuffer->set_style_scheme($scheme);
 
     $subsBuffer = Gtk::Source::Buffer->new();
-    # $subsBuffer->set_language($lang);
     $subsBuffer->set_style_scheme($scheme);
 
     $breakpointsBuffer = Gtk::Source::Buffer->new();

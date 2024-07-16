@@ -480,10 +480,10 @@ sub process_msg {
         foreach my $key ( keys %postpone ) {
             my $p = $postpone{$key};
             foreach my $line (@$p) {
-                $data .= $key . "." . $line . "\n";
+                $data .= $key . ":" . $line . "\n";
             }
         }
-        $fifo->write( "breakpoints " . $data );
+        $fifo->write( "breakpoints " . $data ."\n");
     }
 	elsif ( $msg eq "f" ) {
 		my $subs = getSubs();
