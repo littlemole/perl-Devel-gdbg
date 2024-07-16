@@ -13,14 +13,15 @@ use strict;
 
 use Data::Dumper;
 use File::Slurp  qw(slurp write_file);
+use File::Basename;
 use FindBin 1.51 qw( $RealBin );
 
 # IPC package share with debugger
 use Devel::dipc;
 
 # supress some GLib warnings
-local *STDERR;
-open( STDERR, '>', '/dev/null' ) or die $!;
+#local *STDERR;
+#open( STDERR, '>', '/dev/null' ) or die $!;
 
 ##################################################
 # glib and gtk dependencies via gir
@@ -83,6 +84,7 @@ my $scheme;            # gtk source view theme to use
 my $infoBuffer;        # the buffer displaying lexical and call frame stack info
 my $lexicalsBuffer;    # gtk source buffer used to display lexicals vars
 my $subsBuffer;		   # buffer to display subs
+my $breakpointsBuffer; # buffer to display breakpoints
 my %sourceBuffers;     # hash of buffers indexed by filename
 my $ctx;               # GTK main loop context
 
@@ -201,7 +203,9 @@ sub onWindow {
     $openFile = $label;
 
     $widgets{sourceView}->set_buffer( $sourceBuffers{$openFile} );
-    $widgets{mainWindow}->set_title($label);
+    $widgets{mainWindow}->set_title(basename($label));
+	$widgets{statusBar}->set_text(basename($label));
+	$widgets{statusBar}->set_tooltip_text($label);
 }
 
 sub getLine {
@@ -224,6 +228,7 @@ sub getLine {
 sub onMarker {
     my ( $self, $iter, $event ) = @_;
     my $line = $iter->get_line() + 1;
+    my $filename = $openFile;
 
 	if($widgets{sourceView}->get_buffer() eq $subsBuffer) {
 
@@ -231,8 +236,20 @@ sub onMarker {
 		$fifo->write("fb $text");
 		return;
 	}
+	elsif($widgets{sourceView}->get_buffer() eq $breakpointsBuffer) {
 
-    my $filename = $openFile;
+		my $text = getLine($iter,$breakpointsBuffer,$line);
+		if(!$text) { return; }
+		if ( $text =~ /^#/) { return; }
+		if ($text =~ s/([^:]+):([0-9]+)/,/ ) {
+			print "$text\n";
+			my $file = $1;
+			my $line = $2;
+			openFile($file,$line);
+			scroll($line);
+		}
+		return;
+	}
 
     # cannot set break points in eval code
     if ( $filename =~ /^\(eval/ ) {
@@ -306,7 +323,7 @@ sub process_msg {
         my $file = $1;
         my $line = $2;
 
-		print "File $file:$line\n";
+		# print "File $file:$line\n";
 
         $currentLine = $line;
         $currentFile = $file;
@@ -314,13 +331,17 @@ sub process_msg {
             my $src = slurp($file);
             $files{$file} = $src;
         }
+
+        $widgets{statusBar}->set_text(basename($file).":$line");
+		$widgets{statusBar}->set_tooltip_text($file);
+
         openFile( $file, $line );
 
         while ( $ctx->pending() ) {
             $ctx->iteration(0);
         }
         scroll($line);
-        enableButtons(1);
+        enableButtons(1);		
     }
     elsif ( $msg =~ /^info ([^,]+),([0-9]*),(.*)/s ) {
 
@@ -331,7 +352,7 @@ sub process_msg {
         $currentLine = $line;
         $currentFile = $file;
 
-        $infoBuffer->set_text( $info, -1 );
+        $infoBuffer->set_text( $info, -1 );		
     }
     elsif ( $msg =~ /^lexicals ([^,]+),([0-9]*),(.*)/s ) {
 
@@ -341,6 +362,13 @@ sub process_msg {
 
         $lexicalsBuffer->set_text( $info, -1 );
         $widgets{sourceView}->set_buffer($lexicalsBuffer);
+    }
+    elsif ( $msg =~ /^breakpoints (.*)/s ) {
+
+        my $info = $1;
+
+        $breakpointsBuffer->set_text( $info, -1 );
+        $widgets{sourceView}->set_buffer($breakpointsBuffer);
     }
     elsif ( $msg =~ /^marker ([^,]+),([0-9]*)/ ) {
 
@@ -399,7 +427,9 @@ sub openFile {
     my $filename = shift;
     my $line     = shift;
 
-    $widgets{mainWindow}->set_title( $filename . ":" . $line );
+    $widgets{mainWindow}->set_title( basename($filename) . ":" . $line );	
+	$widgets{statusBar}->set_text(basename($filename).":".$line);
+	$widgets{statusBar}->set_tooltip_text($filename);
 
     $openFile = $filename;
     if ( $sourceBuffers{$filename} ) {
@@ -579,6 +609,9 @@ sub build_ui {
     $subsBuffer = Gtk::Source::Buffer->new();
     # $subsBuffer->set_language($lang);
     $subsBuffer->set_style_scheme($scheme);
+
+    $breakpointsBuffer = Gtk::Source::Buffer->new();
+    $breakpointsBuffer->set_style_scheme($scheme);
 
     enableButtons(0);
     $widgets{buttonStop}->set_sensitive(0);

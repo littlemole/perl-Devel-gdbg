@@ -483,7 +483,7 @@ sub process_msg {
                 $data .= $key . "." . $line . "\n";
             }
         }
-        $fifo->write( "lexicals $currentFile,$currentLine," . $data );
+        $fifo->write( "breakpoints " . $data );
     }
 	elsif ( $msg eq "f" ) {
 		my $subs = getSubs();
@@ -570,12 +570,6 @@ sub DB {
             foreach my $msg (@msgs) {
                 process_msg($msg);
             }
-			my $cnt = @msgs;
-			if(!$cnt) {
-				print ".";
-				STDOUT->flush();
-				sleep(1);
-			}
         }
         $breakout = 0;
 
