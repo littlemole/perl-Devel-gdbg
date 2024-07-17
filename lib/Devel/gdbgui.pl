@@ -320,6 +320,15 @@ sub dbint_handler {
 # process messages from debugger
 ##################################################
 
+sub msg_quit {
+	$quit = 2;
+}
+
+sub msg_cwd {
+	$widgets{statusBar}->set_text($1);
+	chdir $1;
+}
+
 sub process_msg {
     my $msg = shift;
 
@@ -332,7 +341,7 @@ sub process_msg {
     elsif ( $msg =~ /^cwd (.*)/ ) {
 
         $widgets{statusBar}->set_text($msg);
-        my $dir = $2;
+        my $dir = $1;
         chdir $dir;
     }
     elsif ( $msg =~ /^pid (.*)/ ) {
