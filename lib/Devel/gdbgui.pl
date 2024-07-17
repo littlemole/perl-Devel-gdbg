@@ -81,15 +81,15 @@ my %widgets;           # UI widgets indexed by widget id
 my $langManager;       # gtsk source language manager
 my $lang;              # gtk source view language (perl)
 my $scheme;            # gtk source view theme to use
-my $infoBuffer;        # the buffer displaying lexical and call frame stack info
+my $infoBuffer;        # the buffer displaying  call frame stack info
 my $lexicalsBuffer;    # gtk source buffer used to display lexicals vars
 my $subsBuffer;		   # buffer to display subs
 my $breakpointsBuffer; # buffer to display breakpoints
-my %sourceBuffers;     # hash of buffers indexed by filename
-my $ctx;               # GTK main loop context
+my %sourceBuffers;     # hash of source code buffers indexed by filename
+my $ctx;               # the GTK main loop context
 
 ##################################################
-# action handlers
+# UI action handlers
 ##################################################
 
 # run command - continue until next breakpoint
@@ -171,11 +171,13 @@ sub onLexicals {
     $fifo->write("l");
 }
 
+# show breakpoints window menu handler
 sub onBreakpoints {
 
     $fifo->write("p");
 }
 
+# show subroutines window menu handler
 sub onSubs {
 
     $fifo->write("f");
@@ -256,6 +258,7 @@ sub onMarker {
     }
 }
 
+# mouse click, if on breakpoints or subroutines view
 sub onClick {
 	my $widget = shift;
 	my $event = shift;
