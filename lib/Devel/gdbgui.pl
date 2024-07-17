@@ -84,6 +84,7 @@ my $scheme;            # gtk source view theme to use
 my $infoBuffer;        # the buffer displaying  call frame stack info
 my $lexicalsBuffer;    # gtk source buffer used to display lexicals vars
 my $subsBuffer;		   # buffer to display subs
+my $filesBuffer;	   # buffer to display files
 my $breakpointsBuffer; # buffer to display breakpoints
 my %sourceBuffers;     # hash of source code buffers indexed by filename
 my $ctx;               # the GTK main loop context
@@ -95,28 +96,28 @@ my $ctx;               # the GTK main loop context
 # run command - continue until next breakpoint
 sub onRun {
 
-    $fifo->write("c");
+    $fifo->write("continue");
     enableButtons(0);
 }
 
 # single step, recursing into functions
 sub onStep {
 
-    $fifo->write("s");
+    $fifo->write("step");
     enableButtons(0);
 }
 
 # single step, jumping over functions
 sub onOver {
 
-    $fifo->write("n");
+    $fifo->write("next");
     enableButtons(0);
 }
 
 # step out of current function, continue stepping afterwards
 sub onOut {
 
-    $fifo->write("r");
+    $fifo->write("return");
     enableButtons(0);
 }
 
@@ -127,18 +128,12 @@ sub onStop {
     kill 'INT', $pid;
 }
 
-# opne the eval child window
-sub openEvalWindow {
-
-    $widgets{evalWindow}->show_all();
-}
-
-# user clicked eval button (or return) in eval window
+# user entered return in eval entry
 sub onEval {
 
     my $e = $widgets{evalEntry}->get_text();
 
-    $fifo->write("e $e");
+    $fifo->write("eval $e");
 }
 
 # user selected open-file from menu
@@ -168,19 +163,19 @@ sub onLexicals {
 
     my $e = $widgets{evalEntry}->get_text();
 
-    $fifo->write("l");
+    $fifo->write("lexicals");
 }
 
 # show breakpoints window menu handler
 sub onBreakpoints {
 
-    $fifo->write("p");
+    $fifo->write("breakpoints");
 }
 
 # show subroutines window menu handler
 sub onSubs {
 
-    $fifo->write("f");
+    $fifo->write("functions");
 }
 
 # user selected theme from Themes menu
@@ -219,7 +214,7 @@ sub onMarker {
 	if($widgets{sourceView}->get_buffer() eq $subsBuffer) {
 
 		my $text = getLine($iter,$subsBuffer,$line);
-		$fifo->write("fb $text");
+		$fifo->write("functionbreak $text");
 		return;
 	}
 	elsif($widgets{sourceView}->get_buffer() eq $breakpointsBuffer) {
@@ -231,6 +226,15 @@ sub onMarker {
 			my $file = $1;
 			my $line = $2;
 			scroll($file,$line);
+		}
+		return;
+	}
+	elsif($widgets{sourceView}->get_buffer() eq $filesBuffer) {
+
+		my $text = getLine($iter,$filesBuffer,$line);
+		if(!$text) { return; }
+		if ( -e $text ) { 
+			openFile($text,1);
 		}
 		return;
 	}
@@ -251,10 +255,10 @@ sub onMarker {
     if ( $breakpoints{$bpn} ) {    # breakpoint already exists, remove it
         $sourceBuffers{$filename}->delete_mark( $breakpoints{$bpn} );
         delete $breakpoints{$bpn};
-        $fifo->write("b $filename,$line");
+        $fifo->write("breakpoint $filename,$line");
     }
     else {
-        $fifo->write("b $filename,$line");
+        $fifo->write("breakpoint $filename,$line");
     }
 }
 
@@ -279,7 +283,7 @@ sub onClick {
 
 	if($widgets{sourceView}->get_buffer() eq $subsBuffer) {
 
-		$fifo->write("fb $text");
+		$fifo->write("functionbreak $text");
 		return;
 	}
 	elsif($widgets{sourceView}->get_buffer() eq $breakpointsBuffer) {
@@ -293,6 +297,24 @@ sub onClick {
 		}
 		return;
 	}
+	elsif($widgets{sourceView}->get_buffer() eq $filesBuffer) {
+		if(!$text) { return; }
+		if ( -e $text ) { 
+			openFile($text,1);
+		}
+		return;
+	}
+}
+
+sub onFiles {
+
+	my @files = keys %files;
+	my @sorted = sort(@files);
+	my $text = join("\n", @sorted);
+	$filesBuffer->set_text($text,-1);
+	$widgets{sourceView}->set_buffer($filesBuffer);
+
+	$widgets{mainWindow}->set_title("Files loaded by the perl interpreter:");
 }
 
 # user closes main window
@@ -300,14 +322,6 @@ sub onDestroy {
 
     kill 'INT', $pid;
     $quit = 1;
-}
-
-# user closes eval child window
-sub onHideEvalWindow {
-
-    my $widget = shift;
-    $widget->hide();
-    return 1;
 }
 
 # INT signal handler
@@ -320,6 +334,57 @@ sub dbint_handler {
 # process messages from debugger
 ##################################################
 
+my @msg_handlers = (
+	{
+		regex   => qr/^quit$/s,
+		handler => \&msg_quit
+	},
+	{
+		regex   => qr/^cwd$/s,
+		handler => \&msg_cwd
+	},
+	{
+		regex   => qr/^pid (.*)$/s,
+		handler => \&msg_pid
+	},
+	{
+		regex   => qr/^file ([^,]+),([0-9]*)/s,
+		handler => \&msg_file
+	},
+	{
+		regex   => qr/^info ([^,]+),([0-9]*),(.*)/s,
+		handler => \&msg_info
+	},
+	{
+		regex   => qr/^lexicals ([^,]+),([0-9]*),(.*)/s,
+		handler => \&msg_lexicals
+	},
+	{
+		regex   => qr/^breakpoints (.*)/s,
+		handler => \&msg_breakpoints
+	},
+	{
+		regex   => qr/^marker ([^,]+),([0-9]*)/s,
+		handler => \&msg_marker
+	},
+	{
+		regex   => qr/^rmarker ([^,]+),([0-9]*)/s,
+		handler => \&msg_rmarker
+	},
+	{
+		regex   => qr/^load ([^,]+),(.*)/s,
+		handler => \&msg_load
+	},
+	{
+		regex   => qr/^eval (.*)/s,
+		handler => \&msg_eval
+	},
+	{
+		regex   => qr/^subs (.*)/s,
+		handler => \&msg_subs
+	},
+);
+
 sub msg_quit {
 	$quit = 2;
 }
@@ -329,131 +394,133 @@ sub msg_cwd {
 	chdir $1;
 }
 
+sub msg_pid {
+	$pid = $1;
+}
+
+sub msg_file {
+	my $file = $1;
+	my $line = $2;
+
+	print "File $file:$line\n";
+
+	$currentLine = $line;
+	$currentFile = $file;
+	if ( !$files{$file} ) {
+		my $src = slurp($file);
+		$files{$file} = $src;
+	}
+
+	scroll($file,$line);
+	enableButtons(1);		
+}
+
+sub msg_info {
+	my $file = $1;
+	my $line = $2;
+	my $info = $3;
+
+	$currentLine = $line;
+	$currentFile = $file;
+
+	$infoBuffer->set_text( $info, -1 );		
+}
+
+sub msg_lexicals {
+
+	my $file = $1;
+	my $line = $2;
+	my $info = $3;
+
+	$lexicalsBuffer->set_text( $info, -1 );
+	$widgets{sourceView}->set_buffer($lexicalsBuffer);
+	$widgets{mainWindow}->set_title("All current lexical (my) variables:");
+}
+
+sub msg_breakpoints {
+
+	my $info = $1;
+
+	$breakpointsBuffer->set_text( $info, -1 );
+	$widgets{sourceView}->set_buffer($breakpointsBuffer);
+	$widgets{mainWindow}->set_title("All breakpoints currently set:");
+}
+
+sub msg_marker {
+
+	my $file = $1;
+	my $line = $2;
+
+	my $bpn = $file . ":" . $line;
+
+	my $buf = $sourceBuffers{$file};
+	if ($buf) {
+		my $iter = $buf->get_iter_at_line( $line - 1 );
+		if ( !$breakpoints{$bpn} ) { # only if not exists
+			my $mark = $sourceBuffers{$file}
+				->create_source_mark( $bpn, "error", $iter );
+			$breakpoints{$bpn} = $mark;
+		}
+	}
+}
+
+sub msg_rmarker {
+
+	my $file = $1;
+	my $line = $2;
+
+	my $bpn = $file . ":" . $line;
+
+	my $buf = $sourceBuffers{$file};
+	if ($buf) {
+		my $iter = $buf->get_iter_at_line( $line - 1 );
+		if ( $breakpoints{$bpn} ) {    # only if already exists
+
+			$sourceBuffers{$file}->delete_mark($breakpoints{$bpn});
+			delete $breakpoints{$bpn};
+		}
+	}
+}
+
+sub msg_load {
+
+	my $file = $1;
+	my $src  = $2;
+	$widgets{statusBar}->set_text("load $file");
+
+	$files{$file} = $src;
+	if ( $file !~ /^\/usr\// ) {
+		openFile($file);
+	}
+}
+
+sub msg_eval {
+
+	my $evaled = $1;
+	$lexicalsBuffer->set_text( $evaled, -1 );
+	$widgets{sourceView}->set_buffer($lexicalsBuffer);
+}
+
+sub msg_subs {
+
+	my $subs = $1;
+	$subsBuffer->set_text( $subs, -1 );
+	$widgets{sourceView}->set_buffer($subsBuffer);
+	$widgets{mainWindow}->set_title("All subroutines loaded:");
+}
+
 sub process_msg {
+
     my $msg = shift;
 
     #	print "MSG: $msg\n";
 
-    if ( $msg eq "quit" ) {
-
-        $quit = 2;
-    }
-    elsif ( $msg =~ /^cwd (.*)/ ) {
-
-        $widgets{statusBar}->set_text($msg);
-        my $dir = $1;
-        chdir $dir;
-    }
-    elsif ( $msg =~ /^pid (.*)/ ) {
-
-        $pid = $1;
-    }
-    elsif ( $msg =~ /^file ([^,]+),([0-9]*)/ ) {
-
-        my $file = $1;
-        my $line = $2;
-
-		# print "File $file:$line\n";
-
-        $currentLine = $line;
-        $currentFile = $file;
-        if ( !$files{$file} ) {
-            my $src = slurp($file);
-            $files{$file} = $src;
-        }
-
-        $widgets{statusBar}->set_text(basename($file).":$line");
-		$widgets{statusBar}->set_tooltip_text($file);
-
-        scroll($file,$line);
-        enableButtons(1);		
-    }
-    elsif ( $msg =~ /^info ([^,]+),([0-9]*),(.*)/s ) {
-
-        my $file = $1;
-        my $line = $2;
-        my $info = $3;
-
-        $currentLine = $line;
-        $currentFile = $file;
-
-        $infoBuffer->set_text( $info, -1 );		
-    }
-    elsif ( $msg =~ /^lexicals ([^,]+),([0-9]*),(.*)/s ) {
-
-        my $file = $1;
-        my $line = $2;
-        my $info = $3;
-
-        $lexicalsBuffer->set_text( $info, -1 );
-        $widgets{sourceView}->set_buffer($lexicalsBuffer);
-    }
-    elsif ( $msg =~ /^breakpoints (.*)/s ) {
-
-        my $info = $1;
-
-        $breakpointsBuffer->set_text( $info, -1 );
-        $widgets{sourceView}->set_buffer($breakpointsBuffer);
-    }
-    elsif ( $msg =~ /^marker ([^,]+),([0-9]*)/ ) {
-
-        my $file = $1;
-        my $line = $2;
-
-        my $bpn = $file . ":" . $line;
-    
-	    my $buf = $sourceBuffers{$file};
-        if ($buf) {
-            my $iter = $buf->get_iter_at_line( $line - 1 );
-            if ( !$breakpoints{$bpn} ) { # only if not exists
-                my $mark = $sourceBuffers{$file}
-                  ->create_source_mark( $bpn, "error", $iter );
-                $breakpoints{$bpn} = $mark;
-            }
-        }
-
-    }
-    elsif ( $msg =~ /^rmarker ([^,]+),([0-9]*)/ ) {
-
-        my $file = $1;
-        my $line = $2;
-
-        my $bpn = $file . ":" . $line;
-    
-	    my $buf = $sourceBuffers{$file};
-        if ($buf) {
-            my $iter = $buf->get_iter_at_line( $line - 1 );
-            if ( $breakpoints{$bpn} ) {    # only if already exists
-
-                $sourceBuffers{$file}->delete_mark($breakpoints{$bpn});
-                delete $breakpoints{$bpn};
-            }
-        }
-
-    }
-    elsif ( $msg =~ /^load ([^,]+),(.*)/s ) {
-
-        my $file = $1;
-        my $src  = $2;
-        $widgets{statusBar}->set_text("load $file");
-
-        $files{$file} = $src;
-        if ( $file !~ /^\/usr\// ) {
-            openFile($file);
-        }
-    }
-    elsif ( $msg =~ /^eval (.*)/s ) {
-
-        my $evaled = $1;
-        $lexicalsBuffer->set_text( $evaled, -1 );
-        $widgets{sourceView}->set_buffer($lexicalsBuffer);
-    }
-    elsif ( $msg =~ /^subs (.*)/s ) {
-
-        my $subs = $1;
-        $subsBuffer->set_text( $subs, -1 );
-        $widgets{sourceView}->set_buffer($subsBuffer);
-    }
+	foreach my $handler ( @msg_handlers) {
+		if ( $msg =~ $handler->{regex} ) {
+			$handler->{handler}->();
+			return;
+		}
+	}
 }
 
 ##################################################
@@ -536,6 +603,8 @@ sub enableButtons {
     $widgets{lexicalsMenu}->set_sensitive($state);
     $widgets{breakpointsMenu}->set_sensitive($state);
     $widgets{openFileMenu}->set_sensitive($state);
+    $widgets{showSubsMenu}->set_sensitive($state);
+    $widgets{showFilesMenu}->set_sensitive($state);
 
     $widgets{buttonStop}->set_sensitive( $state ? 0 : 1 );
 }
@@ -582,6 +651,7 @@ sub mapWidgets {
       mainWindow statusBar
       windowMenu themesMenu
       lexicalsMenu breakpointsMenu
+	  showSubsMenu showFilesMenu
       openFileMenu evalEntry
       sourceView infoPane
       openFile scrollMenu lexicalsMenu
@@ -646,6 +716,9 @@ sub build_ui {
     $subsBuffer = Gtk::Source::Buffer->new();
     $subsBuffer->set_style_scheme($scheme);
 
+    $filesBuffer = Gtk::Source::Buffer->new();
+    $filesBuffer->set_style_scheme($scheme);
+
     $breakpointsBuffer = Gtk::Source::Buffer->new();
     $breakpointsBuffer->set_style_scheme($scheme);
 
@@ -707,6 +780,6 @@ while ( !$quit ) {
 # print "QUIT $quit\n";
 
 if ( $quit == 1 ) {
-    $fifo->write("q");
+    $fifo->write("quit");
 }
 

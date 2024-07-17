@@ -413,91 +413,251 @@ sub getSubs {
 # messages from ui
 ##################################################
 
+my @msg_handlers = (
+	{
+		regex => qr/^quit$/s,
+		handler => \&msg_quit
+	},
+	{
+		regex => qr/^step$/s,
+		handler => \&msg_step
+	},
+	{
+		regex => qr/^lexicals$/s,
+		handler => \&msg_lexicals
+	},
+	{
+		regex => qr/^continue$/s,
+		handler => \&msg_continue
+	},
+	{
+		regex => qr/^next$/s,
+		handler => \&msg_next
+	},
+	{
+		regex => qr/^return$/s,
+		handler => \&msg_return
+	},
+	{
+		regex => qr/^eval (.*)$/ms,
+		handler => \&msg_eval
+	},
+	{
+		regex => qr/^breakpoint ([^,]+),([0-9]+)$/s,
+		handler => \&msg_breakpoint
+	},
+	{
+		regex => qr/^functionbreak (.*)/s,
+		handler => \&msg_functionbreak
+	},
+	{
+		regex => qr/^breakpoints$/s,
+		handler => \&msg_breakpoints
+	},
+	{
+		regex => qr/^functions$/s,
+		handler => \&msg_functions
+	},
+);
+
+sub msg_quit {
+
+	dumpBreakpoints();
+	$fifo->close();
+	POSIX::_exit(0);
+}
+
+sub msg_step {
+
+	$breakout   = 1;
+	$DB::single = 1;
+}
+
+sub msg_lexicals {
+
+#	showLexicals( $currentFile, $currentLine );
+#    my $abspath = $filename;
+
+    my $h = peek_my(3);
+    $lexicals = $h;
+    my $info = "# lexicals:\n" . Dumper($h);
+    $info =~ s/    / /gm;
+
+    my $msg = $currentFile . "," . $currentLine . "," . $info;
+
+    $fifo->write("lexicals $msg");
+
+}
+
+sub msg_continue {
+
+	$breakout   = 1;
+	$DB::single = 0;
+}
+
+sub msg_next {
+
+	$breakout   = 1;
+	$DB::single = 0;
+	$stepover   = $depth + 1;
+}
+
+sub msg_return {
+
+	if ( $depth > 0 ) {
+		$breakout   = 1;
+		$stepout    = 1;
+		$DB::single = 0;
+	}
+	else {
+		$breakout   = 1;
+		$DB::single = 0;
+		$stepover   = $depth + 1;
+	}
+}
+
+sub msg_eval {
+
+	my $r = eval($1);
+	if ($@) {
+		$r = $@;
+	}
+	$fifo->write("eval $r");
+}
+
+sub msg_breakpoint {
+
+	my $file = $1;
+	my $line = $2;
+	setBreakpoint( $file, $line );
+}
+
+sub msg_functionbreak {
+
+	my $fun = $1;
+	my $file = find_module($fun);
+	my $line = brkonsub($fun);
+	$fifo->write("file $file,$line");
+	$fifo->write("marker $file,$line");
+	$breakpoints{"$file:$line"} = 1;
+}
+
+sub msg_breakpoints {
+
+	my $data = "# set breakpoints:\n";
+	foreach my $bp ( keys %breakpoints ) {
+		$data .= $bp . "\n";
+	}
+	$data .= "\n# postponed breakpoints\n";
+	foreach my $key ( keys %postpone ) {
+		my $p = $postpone{$key};
+		foreach my $line (@$p) {
+			$data .= $key . ":" . $line . "\n";
+		}
+	}
+	$fifo->write( "breakpoints " . $data ."\n");
+}
+
+sub msg_functions {
+
+	my $subs = getSubs();
+	$fifo->write("subs $subs");
+}
+
 sub process_msg {
 
     my $msg = shift;
 
     #print "MSG: $msg\n";
 
-    if ( $msg eq "s" ) {    # single step
-
-        $breakout   = 1;
-        $DB::single = 1;
-    }
-    elsif ( $msg eq "q" ) {    # quit
-        dumpBreakpoints();
-        $fifo->close();
-        POSIX::_exit(0);
-    }
-    elsif ( $msg eq "l" ) {    # show lexicals
-        showLexicals( $currentFile, $currentLine );
-    }
-    elsif ( $msg eq "c" ) {    # continue
-
-        $breakout   = 1;
-        $DB::single = 0;
-    }
-    elsif ( $msg eq "n" ) {    # step oover
-
-        $breakout   = 1;
-        $DB::single = 0;
-        $stepover   = $depth + 1;
-    }
-    elsif ( $msg eq "r" ) {    # step out of current function
-
-        if ( $depth > 0 ) {
-            $breakout   = 1;
-            $stepout    = 1;
-            $DB::single = 0;
-        }
-        else {
-            $breakout   = 1;
-            $DB::single = 0;
-            $stepover   = $depth + 1;
-        }
-    }
-    elsif ( $msg =~ /^e (.*)/ ) {    # eval-uate code at current pos
-
-        my $r = eval($1);
-        if ($@) {
-            $r = $@;
-        }
-        $fifo->write("eval $r");
-    }
-    elsif ( $msg =~ /^b ([^,]+),([0-9]+)/ ) {    # set breakpoint
-
-        my $file = $1;
-        my $line = $2;
-        setBreakpoint( $file, $line );
-    }
-    elsif ( $msg =~ /^fb (.*)/ ) {    # set breakpoint at fun
-
-        my $fun = $1;
-		my $file = find_module($fun);
-		my $line = brkonsub($fun);
-		$fifo->write("file $file,$line");
-		$fifo->write("marker $file,$line");
-		$breakpoints{"$file:$line"} = 1;
-    }
-    elsif ( $msg eq "p" ) {                     # dump brakpoint info
-
-        my $data = "# set breakpoints:\n";
-        foreach my $bp ( keys %breakpoints ) {
-            $data .= $bp . "\n";
-        }
-        $data .= "\n# postponed breakpoints\n";
-        foreach my $key ( keys %postpone ) {
-            my $p = $postpone{$key};
-            foreach my $line (@$p) {
-                $data .= $key . ":" . $line . "\n";
-            }
-        }
-        $fifo->write( "breakpoints " . $data ."\n");
-    }
-	elsif ( $msg eq "f" ) {
-		my $subs = getSubs();
-		$fifo->write("subs $subs");
+	foreach my $handler ( @msg_handlers) {
+		if ( $msg =~ $handler->{regex} ) {
+			$handler->{handler}->();
+			return;
+		}
 	}
+
+
+    # if ( $msg eq "step" ) {    # single step
+
+    #     $breakout   = 1;
+    #     $DB::single = 1;
+    # }
+    # elsif ( $msg eq "quit" ) {    # quit
+    #     dumpBreakpoints();
+    #     $fifo->close();
+    #     POSIX::_exit(0);
+    # }
+    # elsif ( $msg eq "lexicals" ) {    # show lexicals
+    #     showLexicals( $currentFile, $currentLine );
+    # }
+    # elsif ( $msg eq "continue" ) {    # continue
+
+    #     $breakout   = 1;
+    #     $DB::single = 0;
+    # }
+    # elsif ( $msg eq "next" ) {    # step oover
+
+    #     $breakout   = 1;
+    #     $DB::single = 0;
+    #     $stepover   = $depth + 1;
+    # }
+    # elsif ( $msg eq "return" ) {    # step out of current function
+
+    #     if ( $depth > 0 ) {
+    #         $breakout   = 1;
+    #         $stepout    = 1;
+    #         $DB::single = 0;
+    #     }
+    #     else {
+    #         $breakout   = 1;
+    #         $DB::single = 0;
+    #         $stepover   = $depth + 1;
+    #     }
+    # }
+    # elsif ( $msg =~ /^eval (.*)/ ) {    # eval-uate code at current pos
+
+    #     my $r = eval($1);
+    #     if ($@) {
+    #         $r = $@;
+    #     }
+    #     $fifo->write("eval $r");
+    # }
+    # elsif ( $msg =~ /^breakpoint ([^,]+),([0-9]+)/ ) {    # set breakpoint
+
+    #     my $file = $1;
+    #     my $line = $2;
+    #     setBreakpoint( $file, $line );
+    # }
+    # elsif ( $msg =~ /^functionbreak (.*)/ ) {    # set breakpoint at fun
+
+    #     my $fun = $1;
+	# 	my $file = find_module($fun);
+	# 	my $line = brkonsub($fun);
+	# 	$fifo->write("file $file,$line");
+	# 	$fifo->write("marker $file,$line");
+	# 	$breakpoints{"$file:$line"} = 1;
+    # }
+    # elsif ( $msg eq "breakpoints" ) {                     # dump brakpoint info
+
+    #     my $data = "# set breakpoints:\n";
+    #     foreach my $bp ( keys %breakpoints ) {
+    #         $data .= $bp . "\n";
+    #     }
+    #     $data .= "\n# postponed breakpoints\n";
+    #     foreach my $key ( keys %postpone ) {
+    #         my $p = $postpone{$key};
+    #         foreach my $line (@$p) {
+    #             $data .= $key . ":" . $line . "\n";
+    #         }
+    #     }
+    #     $fifo->write( "breakpoints " . $data ."\n");
+    # }
+	# elsif ( $msg eq "functions" ) {
+	# 	my $subs = getSubs();
+	# 	$fifo->write("subs $subs");
+	# }
+
 }
 
 ##################################################
