@@ -256,6 +256,42 @@ sub onMarker {
     }
 }
 
+sub onClick {
+	my $widget = shift;
+	my $event = shift;
+
+	my ($r,$x,$y) = $event->get_coords();
+
+	my $pos = $widget->get_vadjustment()->get_value();
+	$y += $pos;
+
+	my ($r,$iter) = $widget->get_iter_at_position($x,$y);
+	$iter->forward_line();
+
+	my $line = $iter->get_line();
+
+	$iter->backward_line();
+
+	my $text = getLine($iter,$widget->get_buffer(),$line);
+
+	if($widgets{sourceView}->get_buffer() eq $subsBuffer) {
+
+		$fifo->write("fb $text");
+		return;
+	}
+	elsif($widgets{sourceView}->get_buffer() eq $breakpointsBuffer) {
+
+		if(!$text) { return; }
+		if ( $text =~ /^#/) { return; }
+		if ($text =~ /([^:]+):([0-9]+)/ ) {
+			my $file = $1;
+			my $line = $2;
+			scroll($file,$line);
+		}
+		return;
+	}
+}
+
 # user closes main window
 sub onDestroy {
 

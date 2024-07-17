@@ -145,6 +145,14 @@ sub find_module {
 	$fun =~ s/::/\//g;
 	my $module = dirname($fun);
 
+	if($module eq "main") {
+		$module = $0;
+		if( $module =~ /^\// ) {
+			return $module;
+		}
+		return getcwd()."/".$module;
+	}
+
     foreach my $i (@$inc) {
         if ( -e "$i/$module.pm" ) {
             return "$i/$module.pm";
@@ -163,6 +171,7 @@ sub find_module {
     if ( -e getcwd() . "/$module.pl" ) {
         return getcwd() . "/$module.pl";
     }
+
 
     return $fun;
 }

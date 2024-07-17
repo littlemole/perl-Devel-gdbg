@@ -379,7 +379,6 @@ Dumper($varname).</property>
                         <property name="show-line-numbers">True</property>
                         <property name="show-line-marks">True</property>
                         <property name="highlight-current-line">True</property>
-                        <signal name="button-press-event" handler="onClick" swapped="no"/>
                         <signal name="line-mark-activated" handler="onMarker" swapped="no"/>
                       </object>
                     </child>
