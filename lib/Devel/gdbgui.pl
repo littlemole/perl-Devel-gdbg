@@ -20,8 +20,8 @@ use FindBin 1.51 qw( $RealBin );
 use Devel::dipc;
 
 # supress some GLib warnings
-#local *STDERR;
-#open( STDERR, '>', '/dev/null' ) or die $!;
+local *STDERR;
+open( STDERR, '>', '/dev/null' ) or die $!;
 
 ##################################################
 # glib and gtk dependencies via gir
