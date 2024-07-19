@@ -102,7 +102,7 @@ $fifo->open_in("/tmp/perl_debugger_finfo_in");
 restoreBreakpoints();
 
 # start tracing
-$DB::trace = 1;
+#$DB::trace = 1;
 
 ##################################################
 # helpers
@@ -205,6 +205,41 @@ sub dumpBreakpoints {
 # logic
 ##################################################
 
+sub setBreakpointOnNextBreakableLine {
+
+	my $abspath = shift;
+	my $line = shift;
+
+	# get short filename, if any
+    my $filename = $files{$abspath};
+    if ( !$filename ) {
+        $filename = $abspath;
+    }
+
+	# starting at the desired line
+	my $l = $line;
+	while(1) {
+		# check if this line is breakable
+		my $r = checkdbline( $filename, $l );
+		if($r == -1) {
+			# error, no lines
+			return -1;
+		}
+		elsif ( $r == 1 ) {
+			# found suitable line to break
+			last;
+		}
+		# try next line
+		$l++;
+	}
+
+	# set and remember the breakpoint
+    my $bpn = $abspath . ":" . $l;
+	$breakpoints{$bpn} = 1;
+	setdbline( $filename, $l, 1 );
+	return $l;
+}
+
 # set a breakpoint
 sub setBreakpoint {
     my $abspath = shift;
@@ -222,30 +257,31 @@ sub setBreakpoint {
         if ( hasdblines($filename) ) {
 
             # set a new breakpoint on this resp. the next breakable line, if any
-            my $l = $line;
-            while ( !checkdbline( $filename, $l ) ) { $l++; }
-            $breakpoints{$bpn} = 1;
-            setdbline( $filename, $l, 1 );
-            $fifo->write("marker $abspath,$l");
+            my $l = setBreakpointOnNextBreakableLine($abspath,$line);
+			if($l != -1 ) {
+
+	            $fifo->write("marker $abspath,$l");
+			}
         }
         else {
 
             # check if this is an existing postponed breakpoint
-            if ( !$postpone{$abspath} ) {
-                $postpone{$abspath} = [];
-            }
-            my $exists = 0;
-            foreach my $p ( @{ $postpone{$abspath} } ) {
-                if ( $p == $line ) {
-                    $exists = 1;
-                }
-            }
-            if (!$exists) {
+            if ( !exists $postpone{$abspath} ) {
+				$postpone{$abspath} = [];
+			}
+			my $exists = 0;
+			foreach my $p ( @{ $postpone{$abspath} } ) {
+				if ( $p == $line ) {
+					$exists = 1;
+				}
+			}
+			if (!$exists) {
 
-                # set a new postponed breakpoint
-                push @{ $postpone{$abspath} }, $line;
-                $fifo->write("marker $abspath,$line");
-            }
+				# set a new postponed breakpoint
+				push @{ $postpone{$abspath} }, $line;
+				$fifo->write("marker $abspath,$line");
+			}
+			
         }
     }
 }
@@ -296,14 +332,13 @@ sub setPotponedBreakpoints {
 	foreach my $p (@$pp) {
 
 		# find breakpoint and update the UI
-		my $l = $p;
-		while ( !checkdbline( $file, $l ) ) { $l++; }
-		my $bpn = $file . ":" . $l;
-		$breakpoints{$bpn} = 1;
-		setdbline( $file, $l, 1 );
-		$fifo->write("marker $file,$l");
+		my $l = setBreakpointOnNextBreakableLine($file,$p);
+		if($l != -1 ) {
+
+			$fifo->write("marker $file,$l");
+		}
 	}
-	$postpone{$file} = [];
+	delete $postpone{$file};
 }
 
 # update the info with current lexicals and call frame stack
@@ -393,15 +428,17 @@ sub checkdbline($$) {
     local ($^W)     = 0;                          # spares us warnings under -w
     local (*dbline) = $main::{ '_<' . $fname };
 
+	if( !defined *dbline) {
+		return -1;
+	}
+
     no strict;
     my $flag = $dbline[$lineno] != 0;
 
-    return $flag;
-
+    return 1;
 }
 
-# helper to set a breakpoint for a subroutine
-sub brkonsub {
+sub getSubLine {
 
     my ($name) = shift;
 
@@ -412,13 +449,7 @@ sub brkonsub {
 
     # file name will be in $1, start line $2, end line $3
     $DB::sub{$name} =~ /(.*):([0-9]+)-([0-9]+)$/o;
-    for ( $2 .. $3 ) {
-        next unless &checkdbline( $1, $_ );
-        setdbline( $1, $_, 1 );
-		return $_;
-        last;
-    }
-	return -1;
+	return $2;
 }
 
 sub getSubs {
@@ -435,162 +466,148 @@ sub getSubs {
 
 my @msg_handlers = (
 	{
+		# quit debugger
 		regex => qr/^quit$/s,
-		handler => \&msg_quit
+		handler => sub {
+
+			dumpBreakpoints();
+			$fifo->close();
+			POSIX::_exit(0);
+		}
 	},
 	{
+		# single step (into)
 		regex => qr/^step$/s,
-		handler => \&msg_step
+		handler => sub {
+
+			$breakout   = 1;
+			$DB::single = 1;
+		}
 	},
 	{
+		# show lexicals
 		regex => qr/^lexicals$/s,
-		handler => \&msg_lexicals
+		handler => sub {
+
+			my $h = peek_my(3);
+			$lexicals = $h;
+			my $info = Dumper($h);
+			$info =~ s/    / /gm;
+
+			my $msg = $currentFile . "," . $currentLine . "," . $info;
+
+			$fifo->write("lexicals $msg");
+		}
 	},
 	{
+		# continue to next breakpoint
 		regex => qr/^continue$/s,
-		handler => \&msg_continue
+		handler => sub {
+
+			$breakout   = 1;
+			$DB::single = 0;
+		}
 	},
 	{
+		# single step (over)
 		regex => qr/^next$/s,
-		handler => \&msg_next
+		handler => sub {
+
+			$breakout   = 1;
+			$DB::single = 0;
+			$stepover   = $depth + 1;
+		}
 	},
 	{
+		# (single) step out of function
 		regex => qr/^return$/s,
-		handler => \&msg_return
+		handler => sub {
+
+			if ( $depth > 0 ) {
+				$breakout   = 1;
+				$stepout    = 1;
+				$DB::single = 0;
+			}
+			else {
+				$breakout   = 1;
+				$DB::single = 0;
+				$stepover   = $depth + 1;
+			}
+		}
 	},
 	{
+		# eval in current context
 		regex => qr/^eval (.*)$/ms,
-		handler => \&msg_eval
+		handler => sub {
+
+			my $r = eval($1);
+			if ($@) {
+				$r = $@;
+			}
+			$fifo->write("eval $r");
+		}
 	},
 	{
+		# ste breakpoint at file:line
 		regex => qr/^breakpoint ([^,]+),([0-9]+)$/s,
-		handler => \&msg_breakpoint
+		handler => sub {
+
+			my $file = $1;
+			my $line = $2;
+			setBreakpoint( $file, $line );
+		}
 	},
 	{
+		# delete breakpoint at file:line
 		regex => qr/^delbreakpoint ([^,]+),([0-9]+)$/s,
-		handler => \&msg_delbreakpoint
+		handler => sub {
+
+			my $file = $1;
+			my $line = $2;
+			deleteBreakpoint( $file, $line );
+		}
 	},
 	{
+		# lookup source position of fq function
 		regex => qr/^functionbreak (.*)/s,
-		handler => \&msg_functionbreak
+		handler => sub {
+
+			my $fun = $1;
+			my $file = find_module($fun);
+			my $line = getSubLine($fun);
+			$fifo->write("show $file,$line");
+		}
 	},
 	{
+		# dump breakpoints for display
 		regex => qr/^breakpoints$/s,
-		handler => \&msg_breakpoints
+		handler => sub {
+
+			my $data = "# set breakpoints:\n";
+			foreach my $bp ( keys %breakpoints ) {
+				$data .= $bp . "\n";
+			}
+			$data .= "\n# postponed breakpoints\n";
+			foreach my $key ( keys %postpone ) {
+				my $p = $postpone{$key};
+				foreach my $line (@$p) {
+					$data .= $key . ":" . $line . "\n";
+				}
+			}
+			$fifo->write( "breakpoints " . $data ."\n");
+		}
 	},
 	{
-		regex => qr/^functions$/s,
-		handler => \&msg_functions
+		# dump list of fq function names
+		regex => qr/^functions$/s,		
+		handler => sub {
+
+			my $subs = getSubs();
+			$fifo->write("subs $subs");
+		}
 	},
 );
 
-sub msg_quit {
-
-	dumpBreakpoints();
-	$fifo->close();
-	POSIX::_exit(0);
-}
-
-sub msg_step {
-
-	$breakout   = 1;
-	$DB::single = 1;
-}
-
-sub msg_lexicals {
-
-    my $h = peek_my(3);
-    $lexicals = $h;
-    my $info = "# lexicals:\n" . Dumper($h);
-    $info =~ s/    / /gm;
-
-    my $msg = $currentFile . "," . $currentLine . "," . $info;
-
-    $fifo->write("lexicals $msg");
-
-}
-
-sub msg_continue {
-
-	$breakout   = 1;
-	$DB::single = 0;
-}
-
-sub msg_next {
-
-	$breakout   = 1;
-	$DB::single = 0;
-	$stepover   = $depth + 1;
-}
-
-sub msg_return {
-
-	if ( $depth > 0 ) {
-		$breakout   = 1;
-		$stepout    = 1;
-		$DB::single = 0;
-	}
-	else {
-		$breakout   = 1;
-		$DB::single = 0;
-		$stepover   = $depth + 1;
-	}
-}
-
-sub msg_eval {
-
-	my $r = eval($1);
-	if ($@) {
-		$r = $@;
-	}
-	$fifo->write("eval $r");
-}
-
-sub msg_breakpoint {
-
-	my $file = $1;
-	my $line = $2;
-	setBreakpoint( $file, $line );
-}
-
-sub msg_delbreakpoint {
-
-	my $file = $1;
-	my $line = $2;
-	deleteBreakpoint( $file, $line );
-}
-
-sub msg_functionbreak {
-
-	my $fun = $1;
-	my $file = find_module($fun);
-	my $line = brkonsub($fun);
-	$fifo->write("file $file,$line");
-#	$fifo->write("marker $file,$line");
-#	$breakpoints{"$file:$line"} = 1;
-}
-
-sub msg_breakpoints {
-
-	my $data = "# set breakpoints:\n";
-	foreach my $bp ( keys %breakpoints ) {
-		$data .= $bp . "\n";
-	}
-	$data .= "\n# postponed breakpoints\n";
-	foreach my $key ( keys %postpone ) {
-		my $p = $postpone{$key};
-		foreach my $line (@$p) {
-			$data .= $key . ":" . $line . "\n";
-		}
-	}
-	$fifo->write( "breakpoints " . $data ."\n");
-}
-
-sub msg_functions {
-
-	my $subs = getSubs();
-	$fifo->write("subs $subs");
-}
 
 sub process_msg {
 
@@ -619,7 +636,7 @@ sub DB {
     my ( $package, $filename, $line ) = caller;
 	my ( $p, $fn, $ln, $fun ) = caller 1;
 
-# print "SINGLE ".$DB::single." $filename:$line $fun\n";
+	# print "SINGLE ".$DB::single." $filename:$line $fun\n";
     my $abspath    = find_file($filename);
     my $isBrkPoint = getdbline( $filename, $line );
 

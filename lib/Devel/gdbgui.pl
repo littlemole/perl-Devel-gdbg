@@ -325,13 +325,14 @@ sub dbint_handler {
 
 my @msg_handlers = (
 	{
+		# quit debugger
 		regex   => qr/^quit$/s,
-#		handler => \&msg_quit
 		handler => sub {
 			$quit = 2;
 		}
 	},
 	{
+		# set current work directory
 		regex   => qr/^cwd$/s,
 		handler => sub {
 			$widgets{statusBar}->set_text($1);
@@ -339,12 +340,14 @@ my @msg_handlers = (
 		}
 	},
 	{
+		# process id (pid) of dubugger process
 		regex   => qr/^pid (.*)$/s,
 		handler => sub {
 			$pid = $1;
 		}
 	},
 	{
+		# display file at line
 		regex   => qr/^file ([^,]+),([0-9]*)/s,
 		handler => sub {
 
@@ -355,16 +358,26 @@ my @msg_handlers = (
 
 			$currentLine = $line;
 			$currentFile = $file;
-			if ( !$files{$file} ) {
-				my $src = slurp($file, binmoder => 'utf8' );
-				$files{$file} = $src;
-			}
 
 			scroll($file,$line);
 			enableButtons(1);		
 		}
 	},
 	{
+		# show file at line (like ddisplay above)
+		# but do not set current file
+		regex   => qr/^show ([^,]+),([0-9]*)/s,
+		handler => sub {
+
+			my $file = $1;
+			my $line = $2;
+
+			scroll($file,$line);
+			enableButtons(1);		
+		}
+	},
+	{
+		# display call stack info
 		regex   => qr/^info ([^,]+),([0-9]*),(.*)/s,
 		handler => sub {
 
@@ -379,6 +392,7 @@ my @msg_handlers = (
 		}
 	},
 	{
+		# display lexicals
 		regex   => qr/^lexicals ([^,]+),([0-9]*),(.*)/s,
 		handler => sub {
 
@@ -392,6 +406,7 @@ my @msg_handlers = (
 		}
 	},
 	{
+		# display breakpoints
 		regex   => qr/^breakpoints (.*)/s,
 		handler => sub {
 
@@ -403,6 +418,7 @@ my @msg_handlers = (
 		}
 	},
 	{
+		# set a marker at file:line
 		regex   => qr/^marker ([^,]+),([0-9]*)/s,
 		handler => sub {
 
@@ -414,7 +430,12 @@ my @msg_handlers = (
 			my $buf = $sourceBuffers{$file};
 			if (!$buf) {
 
-				my $content = slurp($file, binmoder => 'utf8' );
+				my $content = $files{$file};
+				if( !$content ) {
+
+					$content = slurp($file, binmoder => 'utf8' );
+					$files{$file} = $content;
+				}
 				
 				$buf = Gtk::Source::Buffer->new();
 				$buf->set_language($lang);
@@ -434,6 +455,7 @@ my @msg_handlers = (
 		}
 	},
 	{
+		# remove a marker at file:line
 		regex   => qr/^rmarker ([^,]+),([0-9]*)/s,
 		handler => sub {
 
@@ -454,6 +476,7 @@ my @msg_handlers = (
 		}
 	},
 	{
+		# load file,source
 		regex   => qr/^load ([^,]+),(.*)/s,
 		handler => sub {
 
@@ -468,6 +491,7 @@ my @msg_handlers = (
 		}
 	},
 	{
+		# eval results passed as string
 		regex   => qr/^eval (.*)/s,
 		handler => sub {
 
@@ -477,6 +501,7 @@ my @msg_handlers = (
 		}
 	},
 	{
+		# all known subroutines for display
 		regex   => qr/^subs (.*)/s,
 		handler => sub {
 
@@ -527,6 +552,7 @@ sub openFile {
     my $content = $files{$filename};
     if ( !$content && $filename !~ /^\(eval / ) {
         $content = slurp( $filename, binmoder => 'utf8' );
+		$files{$filename} = $content;
     }
 
     # prepare source buffer for display
