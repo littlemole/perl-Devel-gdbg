@@ -211,33 +211,33 @@ sub onMarker {
     my $line = $iter->get_line() + 1;
     my $filename = $openFile;
 
-	if($widgets{sourceView}->get_buffer() eq $subsBuffer) {
+	# if($widgets{sourceView}->get_buffer() eq $subsBuffer) {
 
-		my $text = getLine($iter,$subsBuffer,$line);
-		$fifo->write("functionbreak $text");
-		return;
-	}
-	elsif($widgets{sourceView}->get_buffer() eq $breakpointsBuffer) {
+	# 	my $text = getLine($iter,$subsBuffer,$line);
+	# 	$fifo->write("functionbreak $text");
+	# 	return;
+	# }
+	# elsif($widgets{sourceView}->get_buffer() eq $breakpointsBuffer) {
 
-		my $text = getLine($iter,$breakpointsBuffer,$line);
-		if(!$text) { return; }
-		if ( $text =~ /^#/) { return; }
-		if ($text =~ /([^:]+):([0-9]+)/ ) {
-			my $file = $1;
-			my $line = $2;
-			scroll($file,$line);
-		}
-		return;
-	}
-	elsif($widgets{sourceView}->get_buffer() eq $filesBuffer) {
+	# 	my $text = getLine($iter,$breakpointsBuffer,$line);
+	# 	if(!$text) { return; }
+	# 	if ( $text =~ /^#/) { return; }
+	# 	if ($text =~ /([^:]+):([0-9]+)/ ) {
+	# 		my $file = $1;
+	# 		my $line = $2;
+	# 		scroll($file,$line);
+	# 	}
+	# 	return;
+	# }
+	# elsif($widgets{sourceView}->get_buffer() eq $filesBuffer) {
 
-		my $text = getLine($iter,$filesBuffer,$line);
-		if(!$text) { return; }
-		if ( -e $text ) { 
-			openFile($text,1);
-		}
-		return;
-	}
+	# 	my $text = getLine($iter,$filesBuffer,$line);
+	# 	if(!$text) { return; }
+	# 	if ( -e $text ) { 
+	# 		openFile($text,1);
+	# 	}
+	# 	return;
+	# }
 
     # cannot set break points in eval code
     if ( $filename =~ /^\(eval/ ) {
@@ -245,7 +245,10 @@ sub onMarker {
     }
 
 	my $text = getLine($iter,$sourceBuffers{$filename},$line);
-	if(!$text || $text eq "" || $text =~ /^(use )|(no )|(require)|(package)/ ) {
+	if( !$text || $text eq "" || 
+	    $text =~ /^\s*((use)|(no)|(require)|(package)|#)/ ||
+		$text =~ /^\s+$/ ) 
+	{
 		return;
 	}
 

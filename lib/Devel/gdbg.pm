@@ -61,7 +61,6 @@ my $depth       = 0;     # depth of call chain
 my $breakout    = 0;     # leave gtk loop to return to debugger
 my $currentFile = "";    # the current file of debugging
 my $currentLine = 0;     # the current line being debugged
-my $started     = 0;     # debugging has started
 
 ##################################################
 # caches
@@ -221,6 +220,7 @@ sub setBreakpoint {
 
         # check if file is already loaded by perl
         if ( hasdblines($filename) ) {
+
             # set a new breakpoint on this resp. the next breakable line, if any
             my $l = $line;
             while ( !checkdbline( $filename, $l ) ) { $l++; }
@@ -229,6 +229,7 @@ sub setBreakpoint {
             $fifo->write("marker $abspath,$l");
         }
         else {
+
             # check if this is an existing postponed breakpoint
             if ( !$postpone{$abspath} ) {
                 $postpone{$abspath} = [];
@@ -322,23 +323,6 @@ sub updateInfo {
     my $msg = $abspath . "," . $line . "," . $info;
 
     $fifo->write("info $msg");
-}
-
-# show lexicals
-sub showLexicals {
-
-    my ( $filename, $line ) = @_;
-
-    my $abspath = $filename;
-
-    my $h = peek_my(3);
-    $lexicals = $h;
-    my $info = "# lexicals:\n" . Dumper($h);
-    $info =~ s/    / /gm;
-
-    my $msg = $abspath . "," . $line . "," . $info;
-
-    $fifo->write("lexicals $msg");
 }
 
 ##################################################
@@ -515,9 +499,6 @@ sub msg_step {
 
 sub msg_lexicals {
 
-#	showLexicals( $currentFile, $currentLine );
-#    my $abspath = $filename;
-
     my $h = peek_my(3);
     $lexicals = $h;
     my $info = "# lexicals:\n" . Dumper($h);
@@ -585,8 +566,8 @@ sub msg_functionbreak {
 	my $file = find_module($fun);
 	my $line = brkonsub($fun);
 	$fifo->write("file $file,$line");
-	$fifo->write("marker $file,$line");
-	$breakpoints{"$file:$line"} = 1;
+#	$fifo->write("marker $file,$line");
+#	$breakpoints{"$file:$line"} = 1;
 }
 
 sub msg_breakpoints {
@@ -623,88 +604,6 @@ sub process_msg {
 			return;
 		}
 	}
-
-
-    # if ( $msg eq "step" ) {    # single step
-
-    #     $breakout   = 1;
-    #     $DB::single = 1;
-    # }
-    # elsif ( $msg eq "quit" ) {    # quit
-    #     dumpBreakpoints();
-    #     $fifo->close();
-    #     POSIX::_exit(0);
-    # }
-    # elsif ( $msg eq "lexicals" ) {    # show lexicals
-    #     showLexicals( $currentFile, $currentLine );
-    # }
-    # elsif ( $msg eq "continue" ) {    # continue
-
-    #     $breakout   = 1;
-    #     $DB::single = 0;
-    # }
-    # elsif ( $msg eq "next" ) {    # step oover
-
-    #     $breakout   = 1;
-    #     $DB::single = 0;
-    #     $stepover   = $depth + 1;
-    # }
-    # elsif ( $msg eq "return" ) {    # step out of current function
-
-    #     if ( $depth > 0 ) {
-    #         $breakout   = 1;
-    #         $stepout    = 1;
-    #         $DB::single = 0;
-    #     }
-    #     else {
-    #         $breakout   = 1;
-    #         $DB::single = 0;
-    #         $stepover   = $depth + 1;
-    #     }
-    # }
-    # elsif ( $msg =~ /^eval (.*)/ ) {    # eval-uate code at current pos
-
-    #     my $r = eval($1);
-    #     if ($@) {
-    #         $r = $@;
-    #     }
-    #     $fifo->write("eval $r");
-    # }
-    # elsif ( $msg =~ /^breakpoint ([^,]+),([0-9]+)/ ) {    # set breakpoint
-
-    #     my $file = $1;
-    #     my $line = $2;
-    #     setBreakpoint( $file, $line );
-    # }
-    # elsif ( $msg =~ /^functionbreak (.*)/ ) {    # set breakpoint at fun
-
-    #     my $fun = $1;
-	# 	my $file = find_module($fun);
-	# 	my $line = brkonsub($fun);
-	# 	$fifo->write("file $file,$line");
-	# 	$fifo->write("marker $file,$line");
-	# 	$breakpoints{"$file:$line"} = 1;
-    # }
-    # elsif ( $msg eq "breakpoints" ) {                     # dump brakpoint info
-
-    #     my $data = "# set breakpoints:\n";
-    #     foreach my $bp ( keys %breakpoints ) {
-    #         $data .= $bp . "\n";
-    #     }
-    #     $data .= "\n# postponed breakpoints\n";
-    #     foreach my $key ( keys %postpone ) {
-    #         my $p = $postpone{$key};
-    #         foreach my $line (@$p) {
-    #             $data .= $key . ":" . $line . "\n";
-    #         }
-    #     }
-    #     $fifo->write( "breakpoints " . $data ."\n");
-    # }
-	# elsif ( $msg eq "functions" ) {
-	# 	my $subs = getSubs();
-	# 	$fifo->write("subs $subs");
-	# }
-
 }
 
 ##################################################
@@ -724,7 +623,6 @@ sub DB {
     my $abspath    = find_file($filename);
     my $isBrkPoint = getdbline( $filename, $line );
 
-    $currentLine = $line;
 
     # allow function tracing. see DB::sub below
     $skip = 0;
@@ -751,7 +649,10 @@ sub DB {
     # if we are single stepping, update the UI
     if ($DB::single) {
 
-        $started = 1;
+		# file being debugged has changed
+		# update the displayed file
+		$currentFile = $filename;
+		$currentLine = $line;
 
         # special handling for eval "" code
         if ( $filename =~ /\(eval / ) {
@@ -765,18 +666,8 @@ sub DB {
         # move UI to current file:line
         $fifo->write("file $abspath,$line");
 
-        if ( $currentFile ne $filename ) {
-
-            # file being debugged has changed
-            # update the displayed file
-            $currentFile = $filename;
-        }
-
         # update the info pane call frame stack
         updateInfo( $package, $filename, $line );
-
-        # run the message loop now until users
-        # invokes an action that breaks the debugger
 
         # check if we have postponed breakpoints
 		foreach my $key ( keys %postpone) {
@@ -788,8 +679,13 @@ sub DB {
 			}
         }
 
-        $skip = 1;    # diable function tracing
-        # pump messages from UI
+        # run the message loop now until users
+        # invokes an action that breaks the debugger
+
+		# diable function tracing
+        $skip = 1;    
+        
+		# pump messages from UI
         while ( !$breakout ) {
 
             my @msgs = $fifo->read( \&process_msg );
@@ -799,8 +695,8 @@ sub DB {
         }
         $breakout = 0;
 
-        $skip = 0;    # re-enable function tracing
-
+		# re-enable function tracing
+        $skip = 0;    
     }
 }
 
