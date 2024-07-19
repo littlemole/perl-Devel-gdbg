@@ -217,19 +217,7 @@ sub setBreakpoint {
     }
 
     my $bpn = $abspath . ":" . $line;
-    if ( $breakpoints{$bpn} ) {    # breakpoint already exists, remove it
-
-        # check file is already loaded by perl
-        if ( hasdblines($filename) ) {
-
-            setdbline( $filename, $line, 0 );
-            delete $breakpoints{$bpn};
-        }
-        else {    # should never happen?
-            delete $breakpoints{$bpn};
-        }
-    }
-    else {
+    if ( !$breakpoints{$bpn} ) { 
 
         # check if file is already loaded by perl
         if ( hasdblines($filename) ) {
@@ -246,27 +234,75 @@ sub setBreakpoint {
                 $postpone{$abspath} = [];
             }
             my $exists = 0;
-            my @ps;    # all items from postponed array but $line
             foreach my $p ( @{ $postpone{$abspath} } ) {
                 if ( $p == $line ) {
                     $exists = 1;
                 }
-                else {
-                    push @ps, $p;
-                }
             }
-            if ($exists) {
+            if (!$exists) {
 
-                # postponed breakpoint exists, remove
-                $postpone{$abspath} = \@ps;
-            }
-            else {
                 # set a new postponed breakpoint
                 push @{ $postpone{$abspath} }, $line;
                 $fifo->write("marker $abspath,$line");
             }
         }
     }
+}
+
+sub deleteBreakpoint {
+
+    my $abspath = shift;
+    my $line    = shift;
+
+    my $filename = $files{$abspath};
+    if ( !$filename ) {
+        $filename = $abspath;
+    }
+
+    my $bpn = $abspath . ":" . $line;
+    if ( $breakpoints{$bpn} ) {    
+
+        if ( hasdblines($filename) ) {
+
+            setdbline( $filename, $line, 0 );
+        }
+		delete $breakpoints{$bpn};
+	}
+
+	# remove any postponed breakpoints as well
+	my $exists = 0;
+	my @ps;    # all items from postponed array but $line
+	foreach my $p ( @{ $postpone{$abspath} } ) {
+		if ( $p == $line ) {
+			$exists = 1;
+		}
+		else {
+			push @ps, $p;
+		}
+	}
+	if ($exists) {
+
+		# postponed breakpoint exists, remove
+		$postpone{$abspath} = \@ps;
+	}
+}
+
+sub setPotponedBreakpoints {
+
+	my $file = shift;
+
+	my $pp = $postpone{$file};
+	foreach my $p (@$pp) {
+
+		# find breakpoint and update the UI
+		my $l = $p;
+		while ( !checkdbline( $file, $l ) ) { $l++; }
+		my $bpn = $file . ":" . $l;
+		$breakpoints{$bpn} = 1;
+		setdbline( $file, $l, 1 );
+		$fifo->write("marker $file,$l");
+	}
+	$postpone{$file} = [];
 }
 
 # update the info with current lexicals and call frame stack
@@ -313,7 +349,7 @@ sub showLexicals {
 sub setdbline {
     my ( $fname, $lineno, $value ) = @_;
 
-    # print "# set break at $fname:$lineno\n";
+    # print "# set break at $fname:$lineno = $value\n";
     local (*dbline) = $main::{ '_<' . $fname };
 
     no strict;
@@ -447,6 +483,10 @@ my @msg_handlers = (
 		handler => \&msg_breakpoint
 	},
 	{
+		regex => qr/^delbreakpoint ([^,]+),([0-9]+)$/s,
+		handler => \&msg_delbreakpoint
+	},
+	{
 		regex => qr/^functionbreak (.*)/s,
 		handler => \&msg_functionbreak
 	},
@@ -530,6 +570,13 @@ sub msg_breakpoint {
 	my $file = $1;
 	my $line = $2;
 	setBreakpoint( $file, $line );
+}
+
+sub msg_delbreakpoint {
+
+	my $file = $1;
+	my $line = $2;
+	deleteBreakpoint( $file, $line );
 }
 
 sub msg_functionbreak {
@@ -731,6 +778,16 @@ sub DB {
         # run the message loop now until users
         # invokes an action that breaks the debugger
 
+        # check if we have postponed breakpoints
+		foreach my $key ( keys %postpone) {
+
+			# if we now! have source data for this file
+			if( hasdblines($key) ) {
+
+				setPotponedBreakpoints($key);
+			}
+        }
+
         $skip = 1;    # diable function tracing
         # pump messages from UI
         while ( !$breakout ) {
@@ -832,7 +889,7 @@ sub postponed {
     my $abspath = find_file($file);
     $files{$abspath} = $file;
 
-    #print "LOAD: $file -> $abspath\n";
+    # print "LOAD: $file -> $abspath\n";
 
     if ( $file !~ /Devel\/gdbg.pm$/ ) {    # do not trace ourselves
 
@@ -843,25 +900,7 @@ sub postponed {
         # check if we have postponed breakpoints
         if ( $postpone{$abspath} ) {
 
-            my $pp = $postpone{$abspath};
-            foreach my $p (@$pp) {
-
-                # find breakpoint and update the UI
-                my $l = $p;
-                while ( !checkdbline( $file, $l ) ) { $l++; }
-                my $bpn = $abspath . ":" . $l;
-                $breakpoints{$bpn} = 1;
-                setdbline( $file, $l, 1 );
-                $fifo->write("marker $abspath,$l");
-            }
-            $postpone{$abspath} = [];
-        }
-
-        # for files loaded at runtime (eg require)
-        # break into the Debugger on initial load
-        if ($started) {
-
-            #$DB::single = 1; # we no longer do this?
+			setPotponedBreakpoints($abspath);
         }
     }
 

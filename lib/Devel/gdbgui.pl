@@ -255,7 +255,7 @@ sub onMarker {
     if ( $breakpoints{$bpn} ) {    # breakpoint already exists, remove it
         $sourceBuffers{$filename}->delete_mark( $breakpoints{$bpn} );
         delete $breakpoints{$bpn};
-        $fifo->write("breakpoint $filename,$line");
+        $fifo->write("delbreakpoint $filename,$line");
     }
     else {
         $fifo->write("breakpoint $filename,$line");
@@ -402,12 +402,12 @@ sub msg_file {
 	my $file = $1;
 	my $line = $2;
 
-	print "File $file:$line\n";
+	#print "File $file:$line\n";
 
 	$currentLine = $line;
 	$currentFile = $file;
 	if ( !$files{$file} ) {
-		my $src = slurp($file);
+		my $src = slurp($file, binmoder => 'utf8' );
 		$files{$file} = $src;
 	}
 
@@ -454,13 +454,24 @@ sub msg_marker {
 	my $bpn = $file . ":" . $line;
 
 	my $buf = $sourceBuffers{$file};
-	if ($buf) {
-		my $iter = $buf->get_iter_at_line( $line - 1 );
-		if ( !$breakpoints{$bpn} ) { # only if not exists
-			my $mark = $sourceBuffers{$file}
-				->create_source_mark( $bpn, "error", $iter );
-			$breakpoints{$bpn} = $mark;
+	if (!$buf) {
+
+		my $content = slurp($file, binmoder => 'utf8' );
+		
+		$buf = Gtk::Source::Buffer->new();
+		$buf->set_language($lang);
+		$buf->set_style_scheme($scheme);
+		if ($content) {
+			$buf->set_text( $content, -1 );
 		}
+		$sourceBuffers{$file} = $buf;
+	}
+
+	my $iter = $buf->get_iter_at_line( $line - 1 );
+	if ( !$breakpoints{$bpn} ) { # only if not exists
+		my $mark = $sourceBuffers{$file}
+			->create_source_mark( $bpn, "error", $iter );
+		$breakpoints{$bpn} = $mark;
 	}
 }
 
