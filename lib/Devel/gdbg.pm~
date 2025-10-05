@@ -78,6 +78,8 @@ my %postpone;            # postponed break points
 # INT signal handler
 sub dbint_handler {
     $DB::single = 1;
+
+    # print "signalled\n" ;
 }
 
 $SIG{'INT'} = "DB::dbint_handler";
@@ -85,6 +87,9 @@ $SIG{'INT'} = "DB::dbint_handler";
 ##################################################
 # initialize
 ##################################################
+
+print STDERR "##########################\n";
+print STDERR "INITIALIZE GDBG\n";
 
 my $fifo_dir = $ENV{"GDBG_FIFO_DIR"} || '/tmp/';
 
@@ -102,8 +107,11 @@ $fifo->open_in("$fifo_dir/perl_debugger_finfo_in");
 
 restoreBreakpoints();
 
-# start non tracing
-$DB::trace = 0;
+#$postpone{'/opt/otobo/Kernel/Modules/AgentDashboardCommon.pm'} = [];
+#push @{ $postpone{'/opt/otobo/Kernel/Modules/AgentDashboardCommon.pm'} }, 46;
+
+# start tracing
+$DB::trace = 1;
 
 ##################################################
 # helpers
@@ -113,6 +121,8 @@ sub find_file {
 
     my $file = shift;
     my $inc  = shift;
+
+#print STDERR "F: $file\n";
 
     if ( !$inc ) {
         $inc = \@INC;
@@ -334,6 +344,8 @@ sub setPotponedBreakpoints {
 
 	my $file = shift;
 
+print STDERR "POSTPONE $file\n";
+
 	my $pp = $postpone{$file};	
 	if(!$pp) {
 		$pp = $postpone{abs_path($file)};
@@ -341,10 +353,11 @@ sub setPotponedBreakpoints {
 			return;
 		}
 	}
-
+print STDERR Dumper($pp);	
 	foreach my $p (@$pp) {
 
 		# find breakpoint and update the UI
+print STDERR "BREAK $file,$p\n";		
 		my $l = setBreakpointOnNextBreakableLine($file,$p);
 		if($l != -1 ) {
 
@@ -505,7 +518,6 @@ my @msg_handlers = (
 
 			$breakout   = 1;
 			$DB::single = 1;
-			$DB::trace  = 1;
 		}
 	},
 	{
@@ -530,7 +542,6 @@ my @msg_handlers = (
 
 			$breakout   = 1;
 			$DB::single = 0;
-			$DB::trace  = 0;
 		}
 	},
 	{
@@ -540,7 +551,6 @@ my @msg_handlers = (
 
 			$breakout   = 1;
 			$DB::single = 0;
-			$DB::trace  = 1;
 			$stepover   = $depth + 1;
 		}
 	},
@@ -549,7 +559,6 @@ my @msg_handlers = (
 		regex => qr/^return$/s,
 		handler => sub {
 
-		        $DB::trace = 1;
 			if ( $depth > 0 ) {
 				$breakout   = 1;
 				$stepout    = 1;
@@ -581,6 +590,7 @@ my @msg_handlers = (
 
 			my $file = $1;
 			my $line = $2;
+print STDERR "BR $file,$line/n";			
 			setBreakpoint( $file, $line );
 		}
 	},
@@ -637,12 +647,10 @@ my @msg_handlers = (
 		# fetch line,file
 		regex => qr/^fetch ([^,]+),([0-9]+)$/s,		
 		handler => sub {
-
 			my $file = $1;
 			my $line = $2;
-
+			print STDERR "FETCH $file\n";
 			if($files{$file}) {
-
 				my $src = dbdumpsrc($files{$file});
 				$fifo->write("load $file,$line,$src");
 			}
@@ -678,7 +686,8 @@ sub DB {
     my ( $package, $filename, $line ) = caller;
 	my ( $p, $fn, $ln, $fun ) = caller 1;
 
-    my $abspath = abs_path(find_file($filename));
+	# print "SINGLE ".$DB::single." $filename:$line $fun\n";
+    my $abspath    = abs_path(find_file($filename));
 
     # allow function tracing. see DB::sub below
     $skip = 0;
@@ -695,7 +704,6 @@ sub DB {
     if ( $depth < $stepover ) {
         $stepover   = 0;
         $DB::single = 1;
-        $DB::trace  = 0;
     }
 
     my $isBrkPoint = getdbline( $filename, $line );
@@ -722,7 +730,11 @@ sub DB {
         # special handling for eval "" code
         if ( $filename =~ /\(eval / ) {
 
+#            my $src = dbdumpsrc($filename);
             $files{$filename} = $filename;
+#			$skip = 1;			
+ #           $fifo->write("load $filename,$src");
+#			$skip = 0;
             $abspath = $filename;
         }
 
@@ -748,6 +760,7 @@ sub DB {
         # run the message loop now until users
         # invokes an action that advances the debugger
 
+        
 		# pump messages from UI
         do {
 
@@ -852,10 +865,22 @@ sub postponed {
 		return;
 	}
 
+#	my $seen = exists $files{$path};
     $files{$path} = $file;
+
+    # print "LOAD: $file -> $abspath\n";
 
     if ( $file !~ /Devel\/gdbg.pm$/ ) {    # do not trace ourselves
 
+#print STDERR "postponed: $abspath\n";
+        # send source of this file to UI
+#		 if ( $file =~ /\(eval / ) {		
+#        	my $src = dbdumpsrc($file);
+#        	$fifo->write("load $path,$src");
+#		 }
+
+        # check if we have postponed breakpoints
+#		print STDERR "$path -> ".abs_path($path)."\n";
         if ( $postpone{$path} ) {
 
 			setPotponedBreakpoints($path);

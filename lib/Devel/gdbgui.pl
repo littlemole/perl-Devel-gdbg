@@ -11,8 +11,6 @@ use strict;
 # Perl dependencies
 ##################################################
 
-print "START\n";
-
 use Data::Dumper;
 use File::Slurp  qw(slurp write_file);
 use File::Basename;
@@ -69,13 +67,12 @@ my $quit        = 0;                  # stop the UI
 my $openFile    = "";                 # the currently shown file
 my $currentFile = "";                 # the current file of debugging
 my $currentLine = 0;                  # the current line under debug
-my %files;    # files as seen by debugger, mapped to source
+my %files;    						  # files as seen by debugger, mapped to source
 my $uixml = $RealBin . "/gdbg.ui";    # path to glade xml ui definition
-my $pid   = 0;    # process ID of debugger process, to be signalled
-my %breakpoints;    # remember breakpoint markers so we can delete 'em
-my $fifo;           # IPC with debugger backend
-my $uiDisabled = 1;
-my $subs = {};
+my $pid   = 0;    					  # process ID of debugger process, to be signalled
+my %breakpoints;    				  # remember breakpoint markers so we can delete 'em
+my $fifo;           				  # IPC with debugger backend
+my $uiDisabled = 1;					  # flag for UI disabled/enabled
 
 ##################################################
 # global gtk widgets
@@ -151,9 +148,13 @@ sub onEval {
 sub onOpen {
 
     # show open file dialog
-    my $dlg =
-      Gtk3::FileChooserNative->new( "Open File", $widgets{mainWindow}, 'open',
-        "OK", "Cancel" );
+    my $dlg = Gtk3::FileChooserNative->new( 
+		"Open File", 
+		$widgets{mainWindow}, 
+		'open',
+        "OK", 
+		"Cancel" 
+	);
 
     my $r = $dlg->run();
     if ( $r == -3 ) {    # accept file
@@ -220,12 +221,12 @@ sub onWindow {
 sub onMarker {
     my ( $self, $iter, $event ) = @_;
 
+	# only allow setting breakpoints when interactive
 	if($uiDisabled) {
 		return;
 	}
-    my $line = $iter->get_line() + 1;
-    my $filename = $openFile;
 
+	# if we are not looking at a source file, no breaktpoints
 	if( $widgets{sourceView}->get_buffer() eq $subsBuffer ||
 		$widgets{sourceView}->get_buffer() eq $infoBuffer ||
 		$widgets{sourceView}->get_buffer() eq $breakpointsBuffer ||
@@ -234,12 +235,16 @@ sub onMarker {
 		return;
 	}
 
+	# get line and filename
+    my $line = $iter->get_line() + 1;
+    my $filename = $openFile;
+
     # cannot set break points in eval code
     if ( $filename =~ /^\(eval/ ) {
         return;
     }
-print "onMarker\n";
 
+	# get line of text, skip over some obviously non-breakable lines
 	my $text = getLine($iter,$sourceBuffers{$filename},$line);
 	if( !$text || $text eq "" || 
 	    $text =~ /^\s*((use)|(no)|(require)|(package)|#)/ ||
@@ -248,9 +253,7 @@ print "onMarker\n";
 		return;
 	}
 
-#    my $iter = $sourceBuffers{$filename}->get_iter_at_line( $line - 1 ); #unused!
-print "onMarker2\n";
-
+	# set breakpoints and notify debugger process
     my $bpn = $filename . ":" . $line;
     if ( $breakpoints{$bpn} ) {    # breakpoint already exists, remove it
         $sourceBuffers{$filename}->delete_mark( $breakpoints{$bpn} );
@@ -258,19 +261,13 @@ print "onMarker2\n";
         $fifo->write("delbreakpoint $filename.",".$line");
     }
     else {
-print "write\n";    
         $fifo->write("breakpoint $filename,$line");
-
-#		my $iter = $buf->get_iter_at_line( $line - 1 );
-		# if ( !$breakpoints{$bpn} ) { # only if not exists
-		# 	my $mark = $sourceBuffers{$filename}
-		# 		->create_source_mark( $bpn, "error", $iter );
-		# 	$breakpoints{$bpn} = $mark;
-		# }		
     }
 }
 
+# user clicks the call frame stack
 sub onInfoPaneClick {
+
 	my $widget = shift;
 	my $event = shift;
 
@@ -278,26 +275,7 @@ sub onInfoPaneClick {
 		return;
 	}
 
-	# relative mouse position
-	my ($r,$x,$y) = $event->get_coords();
-
-	# get scroll adjustement
-	my $pos = $widget->get_vadjustment()->get_value();
-	$y += $pos; # reflect scrolling offset
-
-	# now ask for iter
-	my ($r,$iter) = $widget->get_iter_at_position($x,$y);
-	$iter->forward_line();
-
-	# get the line from the iter, (which is line+1)
-	my $line = $iter->get_line();
-
-	# adjust the iter again, now have correct line
-	$iter->backward_line();
-
-	# the the line source text
-	my $text = getLine($iter,$widget->get_buffer(),$line);
-
+	my $text = getLineFromMouseClick($widget,$event);
 	if( $text =~ /[^\[]+\[([^\[]+):([0-9]+)\]/ ) {
 
 		my $file = $1;
@@ -305,37 +283,22 @@ sub onInfoPaneClick {
 
 		scroll($file,$line);
 	}
-
 }
 
 # mouse click on a line, if on breakpoints, files or subroutines view
 sub onClick {
+
 	my $widget = shift;
-	my $event = shift;
+	my $event  = shift;
 
 	if($uiDisabled) {
 		return;
 	}
 
-	# relative mouse position
-	my ($r,$x,$y) = $event->get_coords();
-
-	# get scroll adjustement
-	my $pos = $widget->get_vadjustment()->get_value();
-	$y += $pos; # reflect scrolling offset
-
-	# now ask for iter
-	my ($r,$iter) = $widget->get_iter_at_position($x,$y);
-	$iter->forward_line();
-
-	# get the line from the iter, (which is line+1)
-	my $line = $iter->get_line();
-
-	# adjust the iter again, now have correct line
-	$iter->backward_line();
-
-	# the the line source text
-	my $text = getLine($iter,$widget->get_buffer(),$line);
+	my $text = getLineFromMouseClick($widget,$event);
+	if(!$text) { 
+		return; 
+	}
 
 	if($widgets{sourceView}->get_buffer() eq $subsBuffer) {
 
@@ -344,7 +307,6 @@ sub onClick {
 	}
 	elsif($widgets{sourceView}->get_buffer() eq $breakpointsBuffer) {
 
-		if(!$text) { return; }
 		if ( $text =~ /^#/) { return; }
 		if ($text =~ /([^:]+):([0-9]+)/ ) {
 			my $file = $1;
@@ -354,23 +316,23 @@ sub onClick {
 		return;
 	}
 	elsif($widgets{sourceView}->get_buffer() eq $filesBuffer) {
-		if(!$text) { return; }
-#		if ( -e $text ) { 
-			openFile($text,1);
-#		}
+
+		openFile($text,1);
 		return;
 	}
 }
 
+# show files view
 sub onFiles {
 
 	my @files = keys %files;
 	my @sorted = sort(@files);
 	my $text = join("\n", @sorted);
-	$filesBuffer->set_text($text,-1);
-	$widgets{sourceView}->set_buffer($filesBuffer);
 
-	$widgets{mainWindow}->set_title("Files loaded by the perl interpreter:");
+	$filesBuffer->set_text($text,-1);
+
+	$widgets{sourceView}->set_buffer($filesBuffer);
+	$widgets{mainWindow}->set_title("Files loaded by the debugger:");
 }
 
 # user closes main window
@@ -402,22 +364,21 @@ my @msg_handlers = (
 		# set current work directory
 		regex   => qr/^cwd (,*)/s,
 		handler => sub {
+
 			$widgets{statusBar}->set_text($1);
 			chdir $1;
-			print STDERR "chdir $1\n";
 		}
 	},
 	{
 		# process id (pid) of dubugger process
 		regex   => qr/^pid (.*)$/s,
 		handler => sub {
+
 			$pid = $1;
 
-			print STDERR "PID: $pid\n";
 			foreach my $bp ( keys %breakpoints) {
 				$fifo->write("breaktpoint $bp")
 			}
-
 		}
 	},
 	{
@@ -427,8 +388,6 @@ my @msg_handlers = (
 
 			my $file = $1;
 			my $line = $2;
-
-			#print "File $file:$line\n";
 
 			$currentLine = $line;
 			$currentFile = $file;
@@ -447,7 +406,6 @@ my @msg_handlers = (
 			my $line = $2;
 
 			scroll($file,$line);
-#        	openFile($file);
 			enableButtons(1);		
 		}
 	},
@@ -477,7 +435,7 @@ my @msg_handlers = (
 
 			$lexicalsBuffer->set_text( $info, -1 );
 			$widgets{sourceView}->set_buffer($lexicalsBuffer);
-			$widgets{mainWindow}->set_title("All current lexical (my) variables:");
+			$widgets{mainWindow}->set_title("All current lexical variables:");
 		}
 	},
 	{
@@ -497,7 +455,6 @@ my @msg_handlers = (
 		regex   => qr/^marker ([^,]+),([0-9]*)/s,
 		handler => sub {
 
-print "$&\n";
 			my $file = $1;
 			my $line = $2;
 
@@ -507,14 +464,6 @@ print "$&\n";
 			if (!$buf) {
 
 				$buf = loadBuffer($file,$line);
-
-				# add a menu item to the windows menu
-				my $item = Gtk3::MenuItem->new_with_label($file);
-				$item->signal_connect( 'activate' => \&onWindow );
-
-				print STDERR "ADD WM $file\n";
-				$widgets{windowMenu}->add($item);
-				$widgets{windowMenu}->show_all();
 			}
 
 			my $iter = $buf->get_iter_at_line( $line - 1 );
@@ -556,13 +505,11 @@ print "$&\n";
 			my $file = $1;
 			my $line = $2;
 			my $src  = $3;
-			$widgets{statusBar}->set_text("load $file");
+			$widgets{statusBar}->set_text("$file");
 
 			$files{$file} = $src;
 			if ( $file !~ /^\/usr\// ) {
 				scroll($file,$line);
-#				openFile($file);
-#                            loadBuffer($file);
 			}
 		}
 	},
@@ -581,7 +528,7 @@ print "$&\n";
 		regex   => qr/^subs (.*)/s,
 		handler => sub {
 
-			$subs = $1;
+			my $subs = $1;
 			$subsBuffer->set_text( $subs, -1 );
 			$widgets{sourceView}->set_buffer($subsBuffer);
 			$widgets{mainWindow}->set_title("All subroutines loaded:");
@@ -593,7 +540,7 @@ sub process_msg {
 
     my $msg = shift;
 
-    print "MSG: ".substr($msg,0,60)."\n";
+    #print "MSG: ".substr($msg,0,60)."\n";
 
 	foreach my $handler ( @msg_handlers) {
 		if ( $msg =~ $handler->{regex} ) {
@@ -620,20 +567,20 @@ sub openFile {
     while ( $ctx->pending() ) {
         $ctx->iteration(0);
     }
-	print STDERR "OF WM $filename\n";
 
     $openFile = $filename;
+
+	# if we already have a source buffer for this file
     if ( $sourceBuffers{$filename} ) {
 
-	print STDERR "EXISTS WM $filename\n";
         # file already exists!
         $widgets{sourceView}->set_buffer( $sourceBuffers{$filename} );
 
+		# if we have the source
 		if($files{$filename}) {
 
-			my $startiter = $sourceBuffers{$filename}->get_start_iter();
-			my $enditer   = $sourceBuffers{$filename}->get_end_iter();
-			my $txt = $sourceBuffers{$filename}->get_text($startiter,$enditer,0);
+			# has it changed from display?
+			my $txt = getSource($filename);
 			if(  $txt ne $files{$filename} ) {
 
 				$sourceBuffers{$filename}->set_text( $files{$filename}, -1 );
@@ -642,22 +589,15 @@ sub openFile {
         return;
     }
 
+	# create new source buffer
 	my $buf = loadBuffer($filename,$line);
-
-    # set the new buffer as current buffer for display
-    $widgets{sourceView}->set_buffer($buf);
 
     while ( $ctx->pending() ) {
         $ctx->iteration(0);
     }
 
-    # add a menu item to the windows menu
-    my $item = Gtk3::MenuItem->new_with_label($filename);
-    $item->signal_connect( 'activate' => \&onWindow );
-
-	print STDERR "ADD WM $filename\n";
-    $widgets{windowMenu}->add($item);
-    $widgets{windowMenu}->show_all();
+    # set the new buffer as current buffer for display
+    $widgets{sourceView}->set_buffer($buf);
 
     while ( $ctx->pending() ) {
         $ctx->iteration(0);
@@ -675,20 +615,26 @@ sub loadBuffer {
 	my $file = shift;
 	my $line = shift || 1;
 
+	# get the content
 	my $content = $files{$file};
 	if( !$content ) {
 
+		# if file exists on disk, read it in
 		if(-e $file) {
 
 			$content = slurp($file, binmoder => 'utf8' );
 		}
+		# otherwise ask the debugger process for the file
 		else {
+			# temp dummy content
 			$content = '<unknown>'; # 
+			# ask debugger to provide file
 			$fifo->write("fetch $file,$line");			
 		}
 		$files{$file} = $content;
 	}
 	
+	# create GTK source buffer with content
 	my $buf = Gtk::Source::Buffer->new();
 	$buf->set_language($lang);
 	$buf->set_style_scheme($scheme);
@@ -697,7 +643,25 @@ sub loadBuffer {
 	}
 	$sourceBuffers{$file} = $buf;
 
+	# add a menu item to the windows menu
+	my $item = Gtk3::MenuItem->new_with_label($file);
+	$item->signal_connect( 'activate' => \&onWindow );
+
+	$widgets{windowMenu}->add($item);
+	$widgets{windowMenu}->show_all();
+
 	return $buf;
+}
+
+# get full text source from a existing source buffer
+sub getSource {
+
+	my $filename = shift;
+
+	my $startiter = $sourceBuffers{$filename}->get_start_iter();
+	my $enditer   = $sourceBuffers{$filename}->get_end_iter();
+	my $txt = $sourceBuffers{$filename}->get_text($startiter,$enditer,0);
+	return $txt;
 }
 
 # get a line of text from buffer
@@ -713,6 +677,34 @@ sub getLine {
 	}
 	my $text = $buffer->get_text($iter,$endIter,1);
 	chomp($text);
+
+	return $text;
+}
+
+sub getLineFromMouseClick {
+
+	my $widget = shift;
+	my $event  = shift;
+
+	# relative mouse position
+	my ($r,$x,$y) = $event->get_coords();
+
+	# get scroll adjustement
+	my $pos = $widget->get_vadjustment()->get_value();
+	$y += $pos; # reflect scrolling offset
+
+	# now ask for iter
+	my ($r,$iter) = $widget->get_iter_at_position($x,$y);
+	$iter->forward_line();
+
+	# get the line from the iter, (which is line+1)
+	my $line = $iter->get_line();
+
+	# adjust the iter again, now have correct line
+	$iter->backward_line();
+
+	# the the line source text
+	my $text = getLine($iter,$widget->get_buffer(),$line);
 
 	return $text;
 }
@@ -733,7 +725,7 @@ sub enableButtons {
     $widgets{evalEntry}->set_sensitive($state);
     $widgets{lexicalsMenu}->set_sensitive($state);
     $widgets{breakpointsMenu}->set_sensitive($state);
-    $widgets{openFileMenu}->set_sensitive(1);
+    $widgets{openFileMenu}->set_sensitive($state);
     $widgets{showSubsMenu}->set_sensitive($state);
     $widgets{showFilesMenu}->set_sensitive($state);
 
@@ -752,6 +744,7 @@ sub updateInfo {
 
 # scroll to currently debugged line
 sub scroll {
+
 	my $file = shift;
     my $line = shift;
 
@@ -821,7 +814,7 @@ sub build_ui {
 	# connect UI signal handlers
     $builder->connect_signals_full( \&connect_signals, 0 );
 
-	# syntax highlighting support
+	# Perl syntax highlighting support
     $langManager = Gtk::Source::LanguageManager->new();
     $lang        = $langManager->get_language("perl");
 
@@ -895,8 +888,9 @@ sub initialize {
 
     $fifo = Devel::dipc->new();
 
-    # this will hang until the Debugger has connected
 	my $fifo_dir = $ENV{"GDBG_FIFO_DIR"} || '/tmp/';
+
+    # this will hang until the Debugger has connected
     $fifo->open_in("$fifo_dir/perl_debugger_finfo_out");
     $fifo->open_out("$fifo_dir/perl_debugger_finfo_in");
 }
@@ -905,11 +899,8 @@ sub initialize {
 # THE ui main loop
 ##################################################
 
-print "INIT\n";
 initialize();
-print "UI\n";
 build_ui();
-print "run\n";
 
 while ( !$quit ) {
 
@@ -928,8 +919,6 @@ while ( !$quit ) {
 ##################################################
 # over and out
 ##################################################
-
-# print "QUIT $quit\n";
 
 if ( $quit == 1 ) {
     $fifo->write("quit");
