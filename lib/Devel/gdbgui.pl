@@ -165,6 +165,8 @@ sub onSearch {
 
 		my $buf = $widgets{sourceView}->get_buffer();
 		$buf->select_range($matchStart,$matchEnd);
+
+		$widgets{sourceView}->scroll_to_iter( $matchStart, 0, 1, 0.5, 0.5 );		
 	}
 }
 
@@ -177,6 +179,8 @@ sub onCancelSearch {
 
 		$searchCtx->set_highlight(0);
 	}
+
+	$widgets{search}->set_text("");
 }
 
 # user entered return in eval entry
@@ -828,7 +832,7 @@ sub mapWidgets {
       openFile scrollMenu lexicalsMenu
       buttonRun buttonStep buttonOver
       buttonOut buttonStop buttonLexicals
-      buttonHome
+      buttonHome search
     );
 
     foreach my $wn (@widgetNames) {
