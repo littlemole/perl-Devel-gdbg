@@ -89,6 +89,8 @@ my $filesBuffer;	   # buffer to display files
 my $breakpointsBuffer; # buffer to display breakpoints
 my %sourceBuffers;     # hash of source code buffers indexed by filename
 my $ctx;               # the GTK main loop context
+my $searchSettings;
+my $searchCtx;
 
 ##################################################
 # UI action handlers
@@ -133,6 +135,47 @@ sub onStop {
 	else {
 
 		system($ENV{"GDBG_KILL_CMD"}." $pid");
+	}
+}
+
+sub onSearch {
+
+	my $widget = shift;
+	my $event = shift;
+
+	my $query = $widget->get_text();
+
+	$searchSettings->set_search_text($query);
+
+	$searchCtx = Gtk::Source::SearchContext->new(
+		$widgets{sourceView}->get_buffer(),
+		$searchSettings,
+	);
+
+	$searchCtx->set_highlight(1);
+
+	my ($hasSelection,$startIter,$endIter) = $widgets{sourceView}->get_buffer()->get_selection_bounds();
+
+	my $searchIter = $endIter;	
+	$searchIter->forward_char();
+
+	my ($match,$matchStart, $matchEnd) = $searchCtx->forward($searchIter);
+
+	if($match) {
+
+		my $buf = $widgets{sourceView}->get_buffer();
+		$buf->select_range($matchStart,$matchEnd);
+	}
+}
+
+sub onCancelSearch {
+
+	my $widget = shift;
+	my $event = shift;
+
+	if($searchCtx) {
+
+		$searchCtx->set_highlight(0);
 	}
 }
 
@@ -864,6 +907,12 @@ sub build_ui {
     $breakpointsBuffer = Gtk::Source::Buffer->new();
     $breakpointsBuffer->set_style_scheme($scheme);
 
+	# prepare search support
+	$searchSettings = Gtk::Source::SearchSettings->new();
+	$searchSettings->set_wrap_around(1);
+	$searchSettings->set_regex_enabled(1);
+	$searchSettings->set_case_sensitive(0);
+	
 	# set everything to disabled on startup
     enableButtons(0);
     $widgets{buttonStop}->set_sensitive(0);

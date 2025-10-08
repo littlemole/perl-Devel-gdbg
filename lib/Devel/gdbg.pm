@@ -55,7 +55,7 @@ use Devel::dipc;
 # Debugger globals
 ##################################################
 
-my $skip        = 1;     # skip tracing functions
+#my $skip        = 1;     # skip tracing functions
 my $stepout     = 0;     # step out of function and resume debugger
 my $stepover    = 0;     # step over flag
 my $depth       = 0;     # depth of call chain
@@ -674,14 +674,14 @@ sub process_msg {
 sub DB {
 
 
-	$skip = 1;
+#	$skip = 1;
     my ( $package, $filename, $line ) = caller;
 	my ( $p, $fn, $ln, $fun ) = caller 1;
 
     my $abspath = abs_path(find_file($filename));
 
     # allow function tracing. see DB::sub below
-    $skip = 0;
+#    $skip = 0;
 
     # always skip over ourselves
     if ( $fun && $fun =~ /^Devel::/ ) {
@@ -704,12 +704,12 @@ sub DB {
     }
 
 	# process a bunch of msgs, if any
-	$skip = 1;	
+#	$skip = 1;	
 	my @msgs = $fifo->read( \&process_msg );
 	foreach my $msg (@msgs) {
 		process_msg($msg);
 	}
-	$skip = 0;
+#	$skip = 0;
 
     # if we are single stepping, update the UI
     if ($DB::single) {
@@ -727,7 +727,7 @@ sub DB {
         }
 
 		# diable function tracing
-        $skip = 1;    
+#        $skip = 1;    
 
         # move UI to current file:line
         $fifo->write("file $abspath,$line");
@@ -760,7 +760,7 @@ sub DB {
         $breakout = 0;
 
 		# re-enable function tracing
-        $skip = 0;    
+#        $skip = 0;    
     }
 }
 
@@ -768,10 +768,10 @@ sub DB {
 
 sub sub {
 
-    if ($skip) {    # if skip flag is set skip any tracing
-        no strict;
-        return &$sub;
-    }
+#    if ($skip) {    # if skip flag is set skip any tracing
+#        no strict;
+#        return &$sub;
+#    }
 
     no strict;
     if ( $sub =~ /^Devel::/ ) {    # never trace the Devel:: stuff
@@ -840,7 +840,7 @@ sub sub {
 # called from Perl in debug mode, once files have been loaded
 sub postponed {
 
-    $skip = 1;    # disable function tracing
+#    $skip = 1;    # disable function tracing
 
     my $id = shift;
     $id =~ /::_<(.*)/;
@@ -848,7 +848,7 @@ sub postponed {
 
 	my $path = abs_path(find_file($file));
 	if(!$path) {
-		$skip = 0;
+#		$skip = 0;
 		return;
 	}
 
@@ -862,7 +862,7 @@ sub postponed {
         }
     }
 
-    $skip = 0;    # re-enable function tracing
+#    $skip = 0;    # re-enable function tracing
 }
 
 ##################################################
@@ -871,7 +871,7 @@ sub postponed {
 
 END {
 
-    $skip       = 1;
+#    $skip       = 1;
 
     $DB::single = 0;
     $DB::trace  = 0;
@@ -881,7 +881,7 @@ END {
     $fifo->write("quit");
 
     POSIX::_exit(0);
-    $skip = 0;
+#    $skip = 0;
 }
 
 1;

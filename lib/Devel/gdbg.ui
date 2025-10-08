@@ -8,6 +8,11 @@
     <property name="can-focus">False</property>
     <property name="stock">gtk-file</property>
   </object>
+  <object class="GtkImage" id="imageCancel">
+    <property name="visible">True</property>
+    <property name="can-focus">False</property>
+    <property name="stock">gtk-cancel</property>
+  </object>
   <object class="GtkImage" id="imageHome">
     <property name="visible">True</property>
     <property name="can-focus">False</property>
@@ -37,6 +42,11 @@
     <property name="visible">True</property>
     <property name="can-focus">False</property>
     <property name="icon-name">go-down</property>
+  </object>
+  <object class="GtkImage" id="imageLookup">
+    <property name="visible">True</property>
+    <property name="can-focus">False</property>
+    <property name="icon-name">system-search</property>
   </object>
   <object class="GtkWindow" id="mainWindow">
     <property name="width-request">800</property>
@@ -262,6 +272,48 @@ stepping over any function calls.</property>
                 <property name="fill">True</property>
                 <property name="position">5</property>
               </packing>
+            </child>
+            <child>
+              <object class="GtkBox">
+                <property name="visible">True</property>
+                <property name="can-focus">False</property>
+                <property name="orientation">horizontal</property>
+                <child>
+					<object class="GtkEntry" id="search">
+						<property name="visible">True</property>
+						<property name="can-focus">True</property>
+						<property name="receives-default">True</property>
+						<property name="tooltip-text" translatable="yes">Search curent Buffer</property>
+						<signal name="activate" handler="onSearch" swapped="no"/>
+					</object>
+					<packing>
+						<property name="expand">False</property>
+						<property name="fill">True</property>
+						<property name="position">6</property>
+					</packing>
+				</child>
+				<child>
+					<object class="GtkButton" id="cancelSearch">
+						<property name="visible">True</property>
+						<property name="can-focus">True</property>
+						<property name="receives-default">True</property>
+						<property name="tooltip-text" translatable="yes">Cancel Search</property>
+						<property name="image">imageCancel</property>
+						<signal name="clicked" handler="onCancelSearch" swapped="no"/>
+					</object>
+					<packing>
+						<property name="expand">False</property>
+						<property name="fill">True</property>
+						<property name="position">7</property>
+					</packing>
+				</child>
+
+			  </object>
+			  <packing>
+				<property name="expand">False</property>
+				<property name="fill">True</property>
+				<property name="position">6</property>
+			  </packing>
             </child>
             <child>
               <object class="GtkButton" id="buttonLexicals">
