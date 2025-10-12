@@ -73,6 +73,7 @@ my $pid   = 0;    					  # process ID of debugger process, to be signalled
 my %breakpoints;    				  # remember breakpoint markers so we can delete 'em
 my $fifo;           				  # IPC with debugger backend
 my $uiDisabled = 1;					  # flag for UI disabled/enabled
+my $searchDirection = 'forward';
 
 ##################################################
 # global gtk widgets
@@ -92,8 +93,15 @@ my $ctx;               # the GTK main loop context
 my $searchSettings;
 my $searchCtx;
 
+
+# INT signal handler
+sub dbint_handler {
+
+    $quit = 1;
+}
+
 ##################################################
-# UI action handlers
+# main UI action handlers
 ##################################################
 
 # run command - continue until next breakpoint
@@ -138,51 +146,6 @@ sub onStop {
 	}
 }
 
-sub onSearch {
-
-	my $widget = shift;
-	my $event = shift;
-
-	my $query = $widget->get_text();
-
-	$searchSettings->set_search_text($query);
-
-	$searchCtx = Gtk::Source::SearchContext->new(
-		$widgets{sourceView}->get_buffer(),
-		$searchSettings,
-	);
-
-	$searchCtx->set_highlight(1);
-
-	my ($hasSelection,$startIter,$endIter) = $widgets{sourceView}->get_buffer()->get_selection_bounds();
-
-	my $searchIter = $endIter;	
-	$searchIter->forward_char();
-
-	my ($match,$matchStart, $matchEnd) = $searchCtx->forward($searchIter);
-
-	if($match) {
-
-		my $buf = $widgets{sourceView}->get_buffer();
-		$buf->select_range($matchStart,$matchEnd);
-
-		$widgets{sourceView}->scroll_to_iter( $matchStart, 0, 1, 0.5, 0.5 );		
-	}
-}
-
-sub onCancelSearch {
-
-	my $widget = shift;
-	my $event = shift;
-
-	if($searchCtx) {
-
-		$searchCtx->set_highlight(0);
-	}
-
-	$widgets{search}->set_text("");
-}
-
 # user entered return in eval entry
 sub onEval {
 
@@ -190,6 +153,7 @@ sub onEval {
 
     $fifo->write("eval $e");
 }
+
 
 # user selected open-file from menu
 sub onOpen {
@@ -215,53 +179,6 @@ sub onOpen {
 sub onScroll {
 
     scroll($currentFile,$currentLine);
-}
-
-# user selected 'Show Lexicals' from file menu
-sub onLexicals {
-
-    my $e = $widgets{evalEntry}->get_text();
-
-    $fifo->write("lexicals");
-}
-
-# show breakpoints window menu handler
-sub onBreakpoints {
-
-    $fifo->write("breakpoints");
-}
-
-# show subroutines window menu handler
-sub onSubs {
-
-    $fifo->write("functions");
-}
-
-# user selected theme from Themes menu
-sub onTheme {
-    my ($menuItem) = @_;
-    my $label = $menuItem->get_label();
-
-    my $manager = Gtk::Source::StyleSchemeManager::get_default();
-    $scheme = $manager->get_scheme($label);
-
-    foreach my $key ( keys %sourceBuffers ) {
-
-        $sourceBuffers{$key}->set_style_scheme($scheme);
-    }
-}
-
-# user selects source from Sources Menu
-sub onWindow {
-    my ($menuItem) = @_;
-    my $label = $menuItem->get_label();
-
-    $openFile = $label;
-
-    $widgets{sourceView}->set_buffer( $sourceBuffers{$openFile} );
-    $widgets{mainWindow}->set_title(basename($label));
-	$widgets{statusBar}->set_text(basename($label));
-	$widgets{statusBar}->set_tooltip_text($label);
 }
 
 # set a breakpoint UI handler (click on marker of sourceView)
@@ -312,6 +229,26 @@ sub onMarker {
     }
 }
 
+# user selected 'Show Lexicals' from file menu
+sub onLexicals {
+
+    my $e = $widgets{evalEntry}->get_text();
+
+    $fifo->write("lexicals");
+}
+
+# show breakpoints window menu handler
+sub onBreakpoints {
+
+    $fifo->write("breakpoints");
+}
+
+# show subroutines window menu handler
+sub onSubs {
+
+    $fifo->write("functions");
+}
+
 # user clicks the call frame stack
 sub onInfoPaneClick {
 
@@ -327,7 +264,6 @@ sub onInfoPaneClick {
 
 		my $file = $1;
 		my $line = $2;
-
 		scroll($file,$line);
 	}
 }
@@ -382,6 +318,39 @@ sub onFiles {
 	$widgets{mainWindow}->set_title("Files loaded by the debugger:");
 }
 
+# user selected theme from Themes menu
+sub onTheme {
+    my ($menuItem) = @_;
+    my $label = $menuItem->get_label();
+
+    my $manager = Gtk::Source::StyleSchemeManager::get_default();
+    $scheme = $manager->get_scheme($label);
+
+    foreach my $key ( keys %sourceBuffers ) {
+
+        $sourceBuffers{$key}->set_style_scheme($scheme);
+    }
+	
+	$infoBuffer->set_style_scheme($scheme);;        
+	$lexicalsBuffer->set_style_scheme($scheme);;    
+	$subsBuffer->set_style_scheme($scheme);;		
+	$filesBuffer->set_style_scheme($scheme);;	   
+	$breakpointsBuffer->set_style_scheme($scheme);; 
+}
+
+# user selects source from Sources Menu
+sub onWindow {
+    my ($menuItem) = @_;
+    my $label = $menuItem->get_label();
+
+    $openFile = $label;
+
+    $widgets{sourceView}->set_buffer( $sourceBuffers{$openFile} );
+    $widgets{mainWindow}->set_title(basename($label));
+	$widgets{statusBar}->set_text(basename($label));
+	$widgets{statusBar}->set_tooltip_text($label);
+}
+
 # user closes main window
 sub onDestroy {
 
@@ -389,11 +358,178 @@ sub onDestroy {
     $quit = 1;
 }
 
-# INT signal handler
-sub dbint_handler {
+##################################################
+# UI search support
+##################################################
 
-    $quit = 1;
+sub onSearch {
+
+	my $widget = shift;
+	my $event = shift;
+
+	my $key = $event->get_keyval();
+
+	if($key != Gdk->KEY_Return) {
+		# do default
+		return 0;
+	}
+
+	# check for shift key being pressed
+	my ($unused,$state) = $event->get_state();
+
+	my @stateMask = @$state;
+
+	my $isShift = 0;
+	foreach my $s ( @stateMask ) {
+
+		if( $s eq 'shift-mask') {
+			$isShift = 1;
+		}
+	}
+
+	my $query = $widget->get_text();
+
+	$searchSettings->set_search_text($query);
+
+print STDERR "SENSI: ".$searchSettings->get_case_sensitive()."\n";
+
+	$searchCtx = Gtk::Source::SearchContext->new(
+		$widgets{sourceView}->get_buffer(),
+		$searchSettings,
+	);
+
+	$searchCtx->set_highlight(1);
+
+	my ($hasSelection,$startIter,$endIter) = $widgets{sourceView}->get_buffer()->get_selection_bounds();
+	my ($match,$matchStart, $matchEnd) ;
+
+	my $direction = $isShift 
+		? $searchDirection == 'forward' ? 'backward' : 'forward'   
+		: $searchDirection;
+
+print STDERR "SHIFT: $isShift $direction\n";		
+
+	$searchDirection = $direction;
+
+	if($direction eq 'forward' ) {
+
+		my $searchIter = $endIter;	
+		$searchIter->forward_char();
+
+		($match,$matchStart, $matchEnd) = $searchCtx->forward($searchIter);
+	}
+	else {
+		my $searchIter = $startIter;	
+		($match,$matchStart, $matchEnd) = $searchCtx->backward($searchIter);
+	}
+
+	if($match) {
+
+		my $buf = $widgets{sourceView}->get_buffer();
+		$buf->select_range($matchStart,$matchEnd);
+
+		$widgets{sourceView}->scroll_to_iter( $matchStart, 0, 1, 0.5, 0.5 );		
+	}
+
+	return 1;
 }
+
+sub onCancelSearch {
+
+	my $widget = shift;
+	my $event = shift;
+
+	if($event->button->{type} eq 'button-press') {
+
+		# left click
+		if($event->button->{button} == 1) {
+
+			if($searchCtx) {
+
+				$searchCtx->set_highlight(0);
+			}
+
+			$widgets{search}->set_text("");
+		}
+		# right click
+		if($event->button->{button} == 3) {
+
+			my $dialog = $widgets{searchDialog};
+
+			my $active = $searchDirection eq 'forward' ? 1 : 0;
+			print STDERR "A: $active\n";
+			$widgets{searchForward}->set_active($active);
+			$widgets{searchBackward}->set_active(!$active);
+
+			$dialog->set_transient_for($widgets{mainWindow});
+			$dialog->set_modal(1);
+			$dialog->show_all;
+		}
+	}
+}
+
+# search dialog events
+
+sub onSearchDialogClose {
+
+	my $widget = shift;
+	my $event = shift;
+
+	$widget->hide;
+}
+
+sub onSearchDialogDelete {
+
+	my $widget = shift;
+	my $event = shift;
+
+	return 1;
+}
+
+sub onSearchBackward {
+
+	my $widget = shift;
+	my $event = shift;
+
+	$searchDirection = 'backward';
+}
+
+sub onSearchForward {
+
+	my $widget = shift;
+	my $event = shift;
+
+	$searchDirection = 'forward';
+}
+
+sub onSearchSensitive {
+
+	my $widget = shift;
+	my $event = shift;
+
+	my $value = $widget->get_active;
+print STDERR "SetSensi $value\n";	
+	$searchSettings->set_case_sensitive($value);
+}
+
+sub onSearchWordBoundaries {
+
+	my $widget = shift;
+	my $event = shift;
+
+	my $value = $widget->get_active;
+	$searchSettings->set_at_word_boundaries ($value);
+}
+
+sub onSearchRegexEnabled {
+
+	my $widget = shift;
+	my $event = shift;
+
+	my $value = $widget->get_active;
+	$searchSettings->set_regex_enabled ($value);
+}
+
 
 ##################################################
 # process messages from debugger
@@ -832,7 +968,8 @@ sub mapWidgets {
       openFile scrollMenu lexicalsMenu
       buttonRun buttonStep buttonOver
       buttonOut buttonStop buttonLexicals
-      buttonHome search
+      buttonHome search searchDialog
+	  searchBackward searchForward
     );
 
     foreach my $wn (@widgetNames) {
@@ -944,8 +1081,8 @@ sub initialize {
 	my $fifo_dir = $ENV{"GDBG_FIFO_DIR"} || '/tmp/';
 
     # this will hang until the Debugger has connected
-    $fifo->open_in("$fifo_dir/perl_debugger_finfo_out");
-    $fifo->open_out("$fifo_dir/perl_debugger_finfo_in");
+    $fifo->open_in("$fifo_dir/perl_debugger_fifo_out");
+    $fifo->open_out("$fifo_dir/perl_debugger_fifo_in");
 }
 
 ##################################################

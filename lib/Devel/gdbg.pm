@@ -55,7 +55,6 @@ use Devel::dipc;
 # Debugger globals
 ##################################################
 
-#my $skip        = 1;     # skip tracing functions
 my $stepout     = 0;     # step out of function and resume debugger
 my $stepover    = 0;     # step over flag
 my $depth       = 0;     # depth of call chain
@@ -90,7 +89,7 @@ my $fifo_dir = $ENV{"GDBG_FIFO_DIR"} || '/tmp/';
 
 my $fifo = Devel::dipc->new();
 
-$fifo->open_out("$fifo_dir/perl_debugger_finfo_out");
+$fifo->open_out("$fifo_dir/perl_debugger_fifo_out");
 
 # send current working dir to UI
 $fifo->write( "cwd " . getcwd() );
@@ -98,7 +97,7 @@ $fifo->write( "cwd " . getcwd() );
 # send PID of current process to UI
 $fifo->write( "pid " . $$ );
 
-$fifo->open_in("$fifo_dir/perl_debugger_finfo_in");
+$fifo->open_in("$fifo_dir/perl_debugger_fifo_in");
 
 restoreBreakpoints();
 
@@ -208,7 +207,7 @@ sub dumpBreakpoints {
 }
 
 ##################################################
-# logic
+# breakpoint handling
 ##################################################
 
 sub setBreakpointOnNextBreakableLine {
@@ -246,6 +245,7 @@ sub setBreakpointOnNextBreakableLine {
 	return $l;
 }
 
+# set a breaktpoint
 sub setBreakpoint {
     my $abspath = shift;
     my $line    = shift;
@@ -271,10 +271,10 @@ sub setBreakpoint {
         }
         else {
 
-            # check if this is an existing postponed breakpoint
             if ( !exists $postpone{$abspath} ) {
 				$postpone{$abspath} = [];
 			}
+            # check if this is an existing postponed breakpoint
 			my $exists = 0;
 			foreach my $p ( @{ $postpone{$abspath} } ) {
 				if ( $p == $line ) {
@@ -291,6 +291,7 @@ sub setBreakpoint {
     }
 }
 
+# delete a breaktpoint
 sub deleteBreakpoint {
 
     my $abspath = shift;
@@ -354,32 +355,53 @@ sub setPotponedBreakpoints {
 	delete $postpone{$file};
 }
 
+##############################################
 # update the call frame stack info
+##############################################
+
 sub updateInfo {
 
     my ( $package, $filename, $line ) = @_;
 
-    my $abspath = abs_path(find_file($filename));
+	# extract urrent function
+	my ( $p, $f, $lx, $fun ) = caller 2;
 
-	my $fn = $filename;
-	my $l  = $line;
+	$fun //= '';
 
-    my $info = "# callstack:\n";
+	# callstack with initial entry (current fun)
+	my @stack = (
+		 "# callstack:",
+		"$fun() [$filename:$line]"
+	);
+
+	# walk a bit of the call stack
     for ( my $i = 1 ; $i < 25 ; $i++ ) {
-        my ( $p2, $fn2, $ln2, $fun2 ) = caller $i + 1;
-        if ( !$p2 ) { 
-			$fn = $fn2;
-			$l = $ln2;
+
+		# the callers frame
+        my ( $p1, $fn1, $ln1, $fun1 ) = caller $i + 1;
+		# and the caller callers frame
+        my ( $p2, $fn2, $ln2, $fun2 ) = caller $i + 2;
+
+		# we are probably done
+        if ( !$p1 ) { 
 			last; 
 		}
-		my $f = abs_path($fn) || $fn;
-        $info .= "$fun2() [$f:$l]\n";
-		$l = $ln2;
-		$fn = $fn2;
+
+		# might be empty (like in main)
+		$fun1 //= '';
+		$fun2 //= '';
+		
+		# add one line to the call stack
+		# note the function is fun2!
+		my $f = abs_path($fn1) || $fn1;
+        push @stack, "$fun2() [$f:$ln1]";
     }
 
-    my $msg = $abspath . "," . $line . "," . $info;
+	my $info = join "\r\n", @stack;
 
+	# update the UI
+    my $abspath = abs_path(find_file($filename));
+    my $msg = $abspath . "," . $line . "," . $info. "\n";
     $fifo->write("info $msg");
 }
 
@@ -391,7 +413,6 @@ sub updateInfo {
 sub setdbline {
     my ( $fname, $lineno, $value ) = @_;
 
-    print STDERR  "# set break at $fname:$lineno = $value\n";
     local (*dbline) = $main::{ '_<' . $fname };
 
     no strict;
@@ -461,12 +482,13 @@ sub checkdbline($$) {
     return 1;
 }
 
+# get the start line of a FQ sub name from perl
 sub getSubLine {
 
     my ($name) = shift;
 
     if ( !exists $DB::sub{$name} ) {
-        print "No subroutine $name.  Try main::$name\n";
+#        print "No subroutine $name.  Try main::$name\n";
         return;
     }
 
@@ -475,6 +497,7 @@ sub getSubLine {
 	return $2;
 }
 
+# fetch all known subs known to perl and output FQ sub names
 sub getSubs {
 
 	my @subs = keys %DB::sub;
@@ -484,7 +507,7 @@ sub getSubs {
 }
 
 ##################################################
-# messages from ui
+# process messages from ui
 ##################################################
 
 my @msg_handlers = (
@@ -550,7 +573,7 @@ my @msg_handlers = (
 		handler => sub {
 
 		        $DB::trace = 1;
-			if ( $depth > 0 ) {
+			if ( 0 ) { # $depth > 0 ) {
 				$breakout   = 1;
 				$stepout    = 1;
 				$DB::single = 0;
@@ -558,7 +581,7 @@ my @msg_handlers = (
 			else {
 				$breakout   = 1;
 				$DB::single = 0;
-				$stepover   = $depth + 1;
+				$stepover   = $depth;
 			}
 		}
 	},
@@ -650,12 +673,12 @@ my @msg_handlers = (
 	},
 );
 
-
+# process a single msg from UI via its handler
 sub process_msg {
 
     my $msg = shift;
 
-    print "MSG: $msg\n";
+#   print "MSG: $msg\n";
 
 	foreach my $handler ( @msg_handlers) {
 		if ( $msg =~ $handler->{regex} ) {
@@ -673,43 +696,27 @@ sub process_msg {
 
 sub DB {
 
-
-#	$skip = 1;
     my ( $package, $filename, $line ) = caller;
-	my ( $p, $fn, $ln, $fun ) = caller 1;
 
     my $abspath = abs_path(find_file($filename));
 
-    # allow function tracing. see DB::sub below
-#    $skip = 0;
-
-    # always skip over ourselves
-    if ( $fun && $fun =~ /^Devel::/ ) {
-      return;
-    }
-    if ( $filename =~ /Devel\/gdbg.pm$/ ) {
-		return;
-    }
-
-    # check if we are done stepping over a line
     if ( $depth < $stepover ) {
         $stepover   = 0;
         $DB::single = 1;
         $DB::trace  = 0;
     }
 
+	# check if we have breakpoint
     my $isBrkPoint = getdbline( $filename, $line );
     if ($isBrkPoint) {
         $DB::single = 1;    # set debugger to single step
     }
 
 	# process a bunch of msgs, if any
-#	$skip = 1;	
 	my @msgs = $fifo->read( \&process_msg );
 	foreach my $msg (@msgs) {
 		process_msg($msg);
 	}
-#	$skip = 0;
 
     # if we are single stepping, update the UI
     if ($DB::single) {
@@ -725,9 +732,6 @@ sub DB {
             $files{$filename} = $filename;
             $abspath = $filename;
         }
-
-		# diable function tracing
-#        $skip = 1;    
 
         # move UI to current file:line
         $fifo->write("file $abspath,$line");
@@ -758,20 +762,12 @@ sub DB {
         } while ( !$breakout );
 		
         $breakout = 0;
-
-		# re-enable function tracing
-#        $skip = 0;    
     }
 }
 
 # called from Perl when entering a function to trace function calls
 
 sub sub {
-
-#    if ($skip) {    # if skip flag is set skip any tracing
-#        no strict;
-#        return &$sub;
-#    }
 
     no strict;
     if ( $sub =~ /^Devel::/ ) {    # never trace the Devel:: stuff
@@ -840,15 +836,12 @@ sub sub {
 # called from Perl in debug mode, once files have been loaded
 sub postponed {
 
-#    $skip = 1;    # disable function tracing
-
     my $id = shift;
     $id =~ /::_<(.*)/;
     my $file = $1;
 
 	my $path = abs_path(find_file($file));
 	if(!$path) {
-#		$skip = 0;
 		return;
 	}
 
@@ -861,8 +854,6 @@ sub postponed {
 			setPotponedBreakpoints($path);
         }
     }
-
-#    $skip = 0;    # re-enable function tracing
 }
 
 ##################################################
@@ -870,8 +861,6 @@ sub postponed {
 ##################################################
 
 END {
-
-#    $skip       = 1;
 
     $DB::single = 0;
     $DB::trace  = 0;
@@ -881,7 +870,6 @@ END {
     $fifo->write("quit");
 
     POSIX::_exit(0);
-#    $skip = 0;
 }
 
 1;

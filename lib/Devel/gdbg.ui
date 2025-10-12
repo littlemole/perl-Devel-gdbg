@@ -13,6 +13,11 @@
     <property name="can-focus">False</property>
     <property name="stock">gtk-cancel</property>
   </object>
+  <object class="GtkImage" id="imageCancel2">
+    <property name="visible">True</property>
+    <property name="can-focus">False</property>
+    <property name="stock">gtk-cancel</property>
+  </object>
   <object class="GtkImage" id="imageHome">
     <property name="visible">True</property>
     <property name="can-focus">False</property>
@@ -26,12 +31,12 @@
   <object class="GtkImage" id="imageOut">
     <property name="visible">True</property>
     <property name="can-focus">False</property>
-    <property name="icon-name">go-up</property>
+    <property name="icon-name">go-previous</property>
   </object>
   <object class="GtkImage" id="imageOver">
     <property name="visible">True</property>
     <property name="can-focus">False</property>
-    <property name="icon-name">go-next</property>
+    <property name="icon-name">go-down</property>
   </object>
   <object class="GtkImage" id="imageRun">
     <property name="visible">True</property>
@@ -41,12 +46,155 @@
   <object class="GtkImage" id="imageStep">
     <property name="visible">True</property>
     <property name="can-focus">False</property>
-    <property name="icon-name">go-down</property>
+    <property name="icon-name">go-next</property>
   </object>
   <object class="GtkImage" id="imageLookup">
     <property name="visible">True</property>
     <property name="can-focus">False</property>
     <property name="icon-name">system-search</property>
+  </object>
+<object class="GtkDialog" id="searchDialog">  
+    <property name="title">Search Settings</property>
+    <property name="can-focus">False</property>
+    <property name="type-hint">dialog</property>
+	<signal name="response" handler="onSearchDialogClose" swapped="no"/>
+	<signal name="delete-event" handler="onSearchDialogDelete" swapped="no"/>
+    <child internal-child="vbox">
+      <object class="GtkBox">
+        <property name="can-focus">False</property>
+        <property name="orientation">vertical</property>
+        <property name="spacing">2</property>
+        <child internal-child="action_area">
+          <object class="GtkButtonBox">
+            <property name="can-focus">False</property>
+            <property name="layout-style">end</property>
+            <child>
+              <placeholder/>
+            </child>
+          </object>
+          <packing>
+            <property name="expand">False</property>
+            <property name="fill">False</property>
+            <property name="position">0</property>
+          </packing>
+        </child>
+        <child>
+          <object class="GtkBox">
+            <property name="visible">True</property>
+            <property name="can-focus">False</property>
+            <property name="orientation">vertical</property>
+            <child>
+              <object class="GtkBox">
+                <property name="visible">True</property>
+                <property name="can-focus">False</property>
+                <child>
+                  <object class="GtkLabel">
+                    <property name="visible">True</property>
+                    <property name="can-focus">False</property>
+                    <property name="label" translatable="yes">Search Direction</property>
+                    <property name="xalign">0</property>
+                  </object>
+                  <packing>
+                    <property name="expand">True</property>
+                    <property name="fill">True</property>
+                    <property name="position">0</property>
+                  </packing>
+                </child>
+                <child>
+                  <object class="GtkRadioButton" id="searchBackward">
+                    <property name="label" translatable="yes">Up</property>
+                    <property name="visible">True</property>
+                    <property name="can-focus">True</property>
+                    <property name="receives-default">False</property>
+                    <property name="active">False</property>
+                    <property name="draw-indicator">True</property>
+                    <property name="group">searchForward</property>
+					<signal name="clicked" handler="onSearchBackward" swapped="no"/>
+                  </object>
+                  <packing>
+                    <property name="expand">False</property>
+                    <property name="fill">True</property>
+                    <property name="position">1</property>
+                  </packing>
+                </child>
+                <child>
+                  <object class="GtkRadioButton" id="searchForward">
+                    <property name="label" translatable="yes">Down</property>
+                    <property name="visible">True</property>
+                    <property name="can-focus">True</property>
+                    <property name="receives-default">False</property>
+                    <property name="active">True</property>
+                    <property name="draw-indicator">True</property>
+					<signal name="clicked" handler="onSearchForward" swapped="no"/>
+                  </object>
+                  <packing>
+                    <property name="expand">False</property>
+                    <property name="fill">True</property>
+                    <property name="position">2</property>
+                  </packing>
+                </child>
+              </object>
+              <packing>
+                <property name="expand">False</property>
+                <property name="fill">True</property>
+                <property name="position">0</property>
+              </packing>
+            </child>
+            <child>
+              <object class="GtkCheckButton" id="searchCaseSensitive">
+                <property name="label" translatable="yes">Search Case Sensitive</property>
+                <property name="visible">True</property>
+                <property name="can-focus">True</property>
+                <property name="receives-default">False</property>
+                <property name="draw-indicator">True</property>
+				<signal name="toggled" handler="onSearchSensitive" swapped="no"/>
+              </object>
+              <packing>
+                <property name="expand">False</property>
+                <property name="fill">True</property>
+                <property name="position">1</property>
+              </packing>
+            </child>
+            <child>
+              <object class="GtkCheckButton" id="searchWordBoundaries">
+                <property name="label" translatable="yes">Search Word Boundaries</property>
+                <property name="visible">True</property>
+                <property name="can-focus">True</property>
+                <property name="receives-default">False</property>
+                <property name="draw-indicator">True</property>
+				<signal name="toggled" handler="onSearchWordBoundaries" swapped="no"/>
+              </object>
+              <packing>
+                <property name="expand">False</property>
+                <property name="fill">True</property>
+                <property name="position">2</property>
+              </packing>
+            </child>
+            <child>
+              <object class="GtkCheckButton" id="searchRegexEnabled">
+                <property name="label" translatable="yes">Search Regex enabled</property>
+                <property name="visible">True</property>
+                <property name="can-focus">True</property>
+                <property name="receives-default">False</property>
+                <property name="active">True</property>
+                <property name="draw-indicator">True</property>
+				<signal name="toggled" handler="onSearchRegexEnabled" swapped="no"/>
+              </object>
+              <packing>
+                <property name="expand">False</property>
+                <property name="fill">True</property>
+                <property name="position">3</property>
+              </packing>
+            </child>
+          </object>
+          <packing>
+            <property name="expand">False</property>
+            <property name="fill">True</property>
+            <property name="position">1</property>
+          </packing>
+        </child>
+      </object>
+    </child>
   </object>
   <object class="GtkWindow" id="mainWindow">
     <property name="width-request">800</property>
@@ -92,6 +240,20 @@
                         <signal name="activate" handler="onScroll" swapped="no"/>
                       </object>
                     </child>
+                  </object>
+                </child>
+              </object>
+            </child>
+            <child>
+              <object class="GtkMenuItem">
+                <property name="visible">True</property>
+                <property name="can-focus">False</property>
+                <property name="label" translatable="yes">_Show</property>
+                <property name="use-underline">True</property>
+                <child type="submenu">
+                  <object class="GtkMenu">
+                    <property name="visible">True</property>
+                    <property name="can-focus">False</property>
                     <child>
                       <object class="GtkMenuItem" id="lexicalsMenu">
                         <property name="visible">True</property>
@@ -190,6 +352,24 @@
               </packing>
             </child>
             <child>
+              <object class="GtkButton" id="buttonStop">
+                <property name="label" translatable="yes">Stop</property>
+                <property name="visible">True</property>
+                <property name="can-focus">True</property>
+                <property name="focus-on-click">False</property>
+                <property name="receives-default">True</property>
+                <property name="tooltip-text" translatable="yes">Break into the Debugger.</property>
+                <property name="image">imageCancel2</property>
+                <property name="always-show-image">True</property>
+                <signal name="clicked" handler="onStop" swapped="no"/>
+              </object>
+              <packing>
+                <property name="expand">False</property>
+                <property name="fill">True</property>
+                <property name="position">1</property>
+              </packing>
+            </child>
+            <child>
               <object class="GtkButton" id="buttonStep">
                 <property name="label" translatable="yes">Step</property>
                 <property name="visible">True</property>
@@ -205,7 +385,7 @@ Will recursce into functions.</property>
               <packing>
                 <property name="expand">False</property>
                 <property name="fill">True</property>
-                <property name="position">1</property>
+                <property name="position">2</property>
               </packing>
             </child>
             <child>
@@ -224,7 +404,7 @@ stepping over any function calls.</property>
               <packing>
                 <property name="expand">False</property>
                 <property name="fill">True</property>
-                <property name="position">2</property>
+                <property name="position">3</property>
               </packing>
             </child>
             <child>
@@ -238,23 +418,6 @@ stepping over any function calls.</property>
                 <property name="image">imageOut</property>
                 <property name="always-show-image">True</property>
                 <signal name="clicked" handler="onOut" swapped="no"/>
-              </object>
-              <packing>
-                <property name="expand">False</property>
-                <property name="fill">True</property>
-                <property name="position">3</property>
-              </packing>
-            </child>
-            <child>
-              <object class="GtkButton" id="buttonStop">
-                <property name="label" translatable="yes">Stop</property>
-                <property name="visible">True</property>
-                <property name="can-focus">True</property>
-                <property name="focus-on-click">False</property>
-                <property name="receives-default">True</property>
-                <property name="tooltip-text" translatable="yes">Break into the Debugger.</property>
-                <property name="image">imageOut</property>
-                <signal name="clicked" handler="onStop" swapped="no"/>
               </object>
               <packing>
                 <property name="expand">False</property>
@@ -284,7 +447,7 @@ stepping over any function calls.</property>
 						<property name="can-focus">True</property>
 						<property name="receives-default">True</property>
 						<property name="tooltip-text" translatable="yes">Search curent Buffer</property>
-						<signal name="activate" handler="onSearch" swapped="no"/>
+						<signal name="key-press-event" handler="onSearch" swapped="no"/>
 					</object>
 					<packing>
 						<property name="expand">False</property>
@@ -299,7 +462,7 @@ stepping over any function calls.</property>
 						<property name="receives-default">True</property>
 						<property name="tooltip-text" translatable="yes">Cancel Search</property>
 						<property name="image">imageCancel</property>
-						<signal name="clicked" handler="onCancelSearch" swapped="no"/>
+						<signal name="button-press-event" handler="onCancelSearch" swapped="no"/>
 					</object>
 					<packing>
 						<property name="expand">False</property>
@@ -312,7 +475,7 @@ stepping over any function calls.</property>
 			  <packing>
 				<property name="expand">False</property>
 				<property name="fill">True</property>
-				<property name="position">6</property>
+				<property name="position">8</property>
 			  </packing>
             </child>
             <child>
@@ -327,7 +490,7 @@ stepping over any function calls.</property>
               <packing>
                 <property name="expand">False</property>
                 <property name="fill">True</property>
-                <property name="position">6</property>
+                <property name="position">9</property>
               </packing>
             </child>
             <child>
@@ -342,7 +505,7 @@ stepping over any function calls.</property>
               <packing>
                 <property name="expand">False</property>
                 <property name="fill">True</property>
-                <property name="position">7</property>
+                <property name="position">10</property>
               </packing>
             </child>
           </object>
