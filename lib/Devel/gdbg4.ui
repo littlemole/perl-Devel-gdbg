@@ -1,0 +1,382 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<interface>
+  <requires lib="gtk" version="4.0"/>
+  <requires lib="gtksourceview" version="5.0"/>
+  <menu id="menu">
+    <submenu>
+      <attribute name="label" translatable="yes">_File</attribute>
+      <item>
+        <attribute name="label" translatable="yes">Open Source File</attribute>
+        <attribute name="action">win.onOpen</attribute>
+      </item>
+      <item>
+        <attribute name="label" translatable="yes">Goto Current Line</attribute>
+        <attribute name="action">win.onScroll</attribute>
+      </item>
+    </submenu>
+    <submenu>
+      <attribute name="label" translatable="yes">_Show</attribute>
+      <item>
+        <attribute name="label" translatable="yes">Lexicals</attribute>
+        <attribute name="action">win.onLexicals</attribute>
+      </item>
+      <item>
+        <attribute name="label" translatable="yes">Breakpoints</attribute>
+        <attribute name="action">win.onBreakpoints</attribute>
+      </item>
+      <item>
+        <attribute name="label" translatable="yes">Subroutines</attribute>
+        <attribute name="action">win.onSubs</attribute>
+      </item>
+      <item>
+        <attribute name="label" translatable="yes">Files</attribute>
+        <attribute name="action">win.onFiles</attribute>
+      </item>
+    </submenu>
+    <submenu id="themeMenu">
+      <attribute name="label" translatable="yes">_Themes</attribute>
+    </submenu>
+    <submenu id="sourceMenu">
+      <attribute name="label" translatable="yes">_Sources</attribute>
+    </submenu>
+  </menu>
+  <object class="GtkDialog" id="searchDialog">
+    <property name="title">Search Settings</property>
+    <signal name="close-request" handler="App::Handlers::onSearchDialogDelete" swapped="no"/>
+    <child internal-child="content_area">
+      <object class="GtkBox">
+        <property name="visible">1</property>
+        <property name="orientation">vertical</property>
+        <property name="spacing">2</property>
+        <child>
+          <object class="GtkBox">
+            <property name="orientation">vertical</property>
+            <child>
+              <object class="GtkBox">
+                <child>
+                  <object class="GtkLabel">
+                    <property name="hexpand">1</property>
+                    <property name="label" translatable="1">Search Direction</property>
+                    <property name="xalign">0</property>
+                  </object>
+                </child>
+                <child>
+                  <object class="GtkCheckButton" id="searchBackward">
+                    <property name="label" translatable="1">Up</property>
+                    <property name="group">searchForward</property>
+                    <signal name="toggled" handler="App::Handlers::onSearchBackward" swapped="no"/>
+                  </object>
+                </child>
+                <child>
+                  <object class="GtkCheckButton" id="searchForward">
+                    <property name="label" translatable="1">Down</property>
+                    <property name="active">1</property>
+                    <signal name="toggled" handler="App::Handlers::onSearchForward" swapped="no"/>
+                  </object>
+                </child>
+              </object>
+            </child>
+            <child>
+              <object class="GtkCheckButton" id="searchCaseSensitive">
+                <property name="label" translatable="1">Search Case Sensitive</property>
+                <property name="focusable">1</property>
+                <signal name="toggled" handler="App::Handlers::onSearchSensitive" swapped="no"/>
+              </object>
+            </child>
+            <child>
+              <object class="GtkCheckButton" id="searchWordBoundaries">
+                <property name="label" translatable="1">Search Word Boundaries</property>
+                <property name="focusable">1</property>
+                <signal name="toggled" handler="App::Handlers::onSearchWordBoundaries" swapped="no"/>
+              </object>
+            </child>
+            <child>
+              <object class="GtkCheckButton" id="searchRegexEnabled">
+                <property name="label" translatable="1">Search Regex enabled</property>
+                <property name="focusable">1</property>
+                <property name="active">1</property>
+                <signal name="toggled" handler="App::Handlers::onSearchRegexEnabled" swapped="no"/>
+              </object>
+            </child>
+          </object>
+        </child>
+      </object>
+    </child>
+    <child internal-child="action_area">
+    </child>
+  </object>
+  <object class="GtkApplicationWindow" id="mainWindow">
+    <property name="width-request">800</property>
+    <property name="height-request">500</property>
+    <signal name="close-request" handler="App::Handlers::onClose" swapped="no"/>
+    <property name="child">
+      <object class="GtkBox">
+        <property name="orientation">vertical</property>
+        <child>
+          <object class="GtkPopoverMenuBar" id="mainMenuBar">
+			<property name="menu-model">menu</property>
+            <property name="visible">True</property>
+            <property name="can-focus">False</property>
+          </object>
+        </child>
+        <child>
+          <object class="GtkBox">
+            <child>
+              <object class="GtkButton" id="buttonRun">
+                <property name="focusable">1</property>
+                <property name="focus-on-click">0</property>
+                <property name="receives-default">1</property>
+                <property name="tooltip-text" translatable="1">Continue to next breakpoint</property>
+                <property name="action-name">win.onRun</property>
+				<child>
+					<object class="GtkBox">
+						<property name="spacing">6</property>
+						<child>
+							<object class="GtkImage">
+								<property name="icon-name">media-playback-start</property>
+							</object>
+						</child>
+						<child>
+							<object class="GtkLabel">
+								<property name="label">Run</property>
+							</object>
+						</child>
+					</object>           
+				</child>
+              </object>
+            </child>
+            <child>
+              <object class="GtkButton" id="buttonStop">
+                <property name="focusable">1</property>
+                <property name="focus-on-click">0</property>
+                <property name="receives-default">1</property>
+                <property name="tooltip-text" translatable="1">Break into the Debugger.</property>
+                <property name="action-name">win.onStop</property>
+				<child>
+					<object class="GtkBox">
+						<property name="spacing">6</property>
+						<child>
+							<object class="GtkImage">
+								<property name="icon-name">gtk-cancel</property>
+							</object>
+						</child>
+						<child>
+							<object class="GtkLabel">
+								<property name="label">Stop</property>
+							</object>
+						</child>
+					</object>           
+				</child>
+              </object>
+            </child>
+            <child>
+              <object class="GtkButton" id="buttonStep">
+                <property name="focusable">1</property>
+                <property name="focus-on-click">0</property>
+                <property name="receives-default">1</property>
+                <property name="tooltip-text" translatable="1">Step into bext line of code.
+Will recursce into functions.</property>
+                <property name="action-name">win.onStep</property>
+				<child>
+					<object class="GtkBox">
+						<property name="spacing">6</property>
+						<child>
+							<object class="GtkImage">
+								<property name="icon-name">go-next</property>
+							</object>
+						</child>
+						<child>
+							<object class="GtkLabel">
+								<property name="label">Step</property>
+							</object>
+						</child>
+					</object>           
+				</child>
+              </object>
+            </child>
+            <child>
+              <object class="GtkButton" id="buttonOver">
+                <property name="focusable">1</property>
+                <property name="focus-on-click">0</property>
+                <property name="receives-default">1</property>
+                <property name="tooltip-text" translatable="1">Step to next line of code,
+stepping over any function calls.</property>
+                <property name="action-name">win.onOver</property>
+				<child>
+					<object class="GtkBox">
+						<property name="spacing">6</property>
+						<child>
+							<object class="GtkImage">
+								<property name="icon-name">go-down</property>
+							</object>
+						</child>
+						<child>
+							<object class="GtkLabel">
+								<property name="label">Step Over</property>
+							</object>
+						</child>
+					</object>           
+				</child>
+              </object>
+            </child>
+            <child>
+              <object class="GtkButton" id="buttonOut">
+                <property name="focusable">1</property>
+                <property name="focus-on-click">0</property>
+                <property name="receives-default">1</property>
+                <property name="tooltip-text" translatable="1">Step out of current function.</property>
+                <property name="action-name">win.onOut</property>
+				<child>
+					<object class="GtkBox">
+						<property name="spacing">6</property>
+						<child>
+							<object class="GtkImage">
+								<property name="icon-name">go-previous</property>
+							</object>
+						</child>
+						<child>
+							<object class="GtkLabel">
+								<property name="label">Step Out</property>
+							</object>
+						</child>
+					</object>           
+				</child>
+              </object>
+            </child>
+            <child>
+              <object class="GtkLabel">
+                <property name="hexpand">1</property>
+              </object>
+            </child>
+            <child>
+              <object class="GtkBox">
+                <child>
+                  <object class="GtkEntry" id="search">
+                    <property name="focusable">1</property>
+                    <property name="receives-default">1</property>
+                    <property name="tooltip-text" translatable="1">Search curent Buffer</property>
+                  </object>
+                </child>
+                <child>
+                  <object class="GtkButton" id="cancelSearch">
+                    <property name="focusable">1</property>
+                    <property name="receives-default">1</property>
+                    <property name="tooltip-text" translatable="1">Cancel Search</property>
+				    <child>
+						<object class="GtkImage">
+							<property name="icon-name">gtk-cancel</property>
+						</object>
+				    </child>
+                  </object>
+                </child>
+              </object>
+            </child>
+            <child>
+              <object class="GtkButton" id="buttonLexicals">
+                <property name="focusable">1</property>
+                <property name="receives-default">1</property>
+                <property name="tooltip-text" translatable="1">Show lexical variables</property>
+                <property name="action-name">win.onLexicals</property>
+				    <child>
+						<object class="GtkImage">
+							<property name="icon-name">gtk-properties</property>
+						</object>
+				    </child>
+              </object>
+            </child>
+            <child>
+              <object class="GtkButton" id="buttonHome">
+                <property name="focusable">1</property>
+                <property name="receives-default">1</property>
+                <property name="tooltip-text" translatable="1">Go to current line being debugged.</property>
+                <property name="action-name">win.onScroll</property>
+				    <child>
+						<object class="GtkImage">
+							<property name="icon-name">gtk-jump-to</property>
+						</object>
+				    </child>
+              </object>
+            </child>
+          </object>
+        </child>
+        <child>
+          <object class="GtkPaned" id="mainPanel">
+            <property name="vexpand">1</property>
+            <property name="focusable">1</property>
+            <property name="position">200</property>
+            <property name="position-set">1</property>
+            <property name="wide-handle">1</property>
+            <property name="start-child">
+              <object class="GtkBox">
+                <property name="orientation">vertical</property>
+                <child>
+                  <object class="GtkScrolledWindow">
+                    <property name="vexpand">1</property>
+                    <property name="focusable">1</property>
+                    <child>
+                      <object class="GtkSourceView" id="infoPane">
+                        <property name="visible">True</property>
+                        <property name="can-focus">True</property>
+                        <property name="left-margin">2</property>
+                        <property name="right-margin">2</property>
+                      </object>
+                    </child>
+                  </object>
+                </child>
+                <child>
+                  <object class="GtkBox">
+                    <property name="valign">center</property>
+                    <property name="width-request">150</property>
+                    <property name="orientation">vertical</property>
+                    <child>
+                      <object class="GtkEntry" id="evalEntry">
+                        <property name="valign">center</property>
+                        <property name="width-request">100</property>
+                        <property name="focusable">1</property>
+                        <property name="tooltip-text" translatable="1">Enter variable name or simple perl statement for eval in current context. Hint: use
+Dumper($varname).</property>
+                        <property name="text" translatable="1">... eval</property>
+                        <property name="placeholder-text" translatable="1">... eval</property>
+                        <signal name="activate" handler="App::Handlers::onEval" swapped="no"/>
+                      </object>
+                    </child>
+                  </object>
+                </child>
+              </object>
+            </property>
+            <property name="end-child">
+              <object class="GtkBox">
+                <property name="orientation">vertical</property>
+                <child>
+                  <object class="GtkScrolledWindow">
+                    <property name="vexpand">1</property>
+                    <property name="focusable">1</property>
+                    <child>
+                      <object class="GtkSourceView" id="sourceView">
+                        <property name="visible">True</property>
+                        <property name="can-focus">True</property>
+                        <property name="left-margin">2</property>
+                        <property name="right-margin">2</property>
+                        <property name="monospace">True</property>
+                        <property name="show-line-numbers">True</property>
+                        <property name="show-line-marks">True</property>
+                        <property name="highlight-current-line">True</property>
+                        <signal name="line-mark-activated" handler="App::Handlers::onMarker" swapped="no"/>
+                      </object>
+                    </child>
+                  </object>
+                </child>
+                <child>
+                  <object class="GtkLabel" id="statusBar">
+                    <property name="label" translatable="1">label</property>
+                    <property name="xalign">0</property>
+                  </object>
+                </child>
+              </object>
+            </property>
+          </object>
+        </child>
+      </object>
+    </property>
+  </object>
+</interface>

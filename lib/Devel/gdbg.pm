@@ -368,6 +368,8 @@ sub updateInfo {
 
 	$fun //= '';
 
+	$filename = abs_path($filename) || $filename;
+
 	# callstack with initial entry (current fun)
 	my @stack = (
 		 "# callstack:",
@@ -594,7 +596,7 @@ my @msg_handlers = (
 			if ($@) {
 				$r = $@;
 			}
-			$fifo->write("eval $r");
+			$fifo->write("evaluate $r");
 		}
 	},
 	{

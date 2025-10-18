@@ -1,207 +1,222 @@
 
-##################################################
-package gdbgui;
-##################################################
+package App;
 
 use v5.20;
 use utf8;
 use strict;
 
-##################################################
-# Perl dependencies
-##################################################
-
-use Data::Dumper;
 use File::Slurp  qw(slurp write_file);
 use File::Basename;
 use FindBin 1.51 qw( $RealBin );
 
-# IPC package share with debugger
 use Devel::dipc;
+use Devel::ui;
 
 # supress some GLib warnings
 #local *STDERR;
 #open( STDERR, '>', '/dev/null' ) or die $!;
 
-##################################################
-# glib and gtk dependencies via gir
-##################################################
-
-use Glib::Object::Introspection;
-
-Glib::Object::Introspection->setup(
-    basename => 'GLib',
-    version  => '2.0',
-    package  => 'GLib'
-);
-
-Glib::Object::Introspection->setup(
-    basename => 'Gio',
-    version  => '2.0',
-    package  => 'Glib::IO'
-);
-
-Glib::Object::Introspection->setup(
-    basename => 'Gdk',
-    version  => '3.0',
-    package  => 'Gdk'
-);
-
-Glib::Object::Introspection->setup(
-    basename => 'Gtk',
-    version  => '3.0',
-    package  => 'Gtk3'
-);
-
-Glib::Object::Introspection->setup(
-    basename => 'GtkSource',
-    version  => '4',
-    package  => 'Gtk::Source'
-);
-
-##################################################
 # Debugger UI globals
-##################################################
 
-my $quit        = 0;                  # stop the UI
-my $openFile    = "";                 # the currently shown file
-my $currentFile = "";                 # the current file of debugging
-my $currentLine = 0;                  # the current line under debug
-my %files;    						  # files as seen by debugger, mapped to source
-my $uixml = $RealBin . "/gdbg.ui";    # path to glade xml ui definition
-my $pid   = 0;    					  # process ID of debugger process, to be signalled
-my %breakpoints;    				  # remember breakpoint markers so we can delete 'em
-my $fifo;           				  # IPC with debugger backend
-my $uiDisabled = 1;					  # flag for UI disabled/enabled
-my $searchDirection = 'forward';
+my $uixml = $RealBin . "/gdbg4.ui";    # path to glade xml ui definition
 
-##################################################
+our $openFile    = "";                 # the currently shown file
+our $currentFile = "";                 # the current file of debugging
+our $currentLine = 0;                  # the current line under debug
+our %files;    						   # files as seen by debugger, mapped to source
+our %breakpoints;    				   # remember breakpoint markers so we can delete 'em
+our $fifo;           				   # IPC with debugger backend
+our $uiDisabled = 1;				   # flag for UI disabled/enabled
+our $searchDirection = 'forward';
+
 # global gtk widgets
-##################################################
 
-my %widgets;           # UI widgets indexed by widget id
-my $langManager;       # gtsk source language manager
-my $lang;              # gtk source view language (perl)
-my $scheme;            # gtk source view theme to use
-my $infoBuffer;        # the buffer displaying  call frame stack info
-my $lexicalsBuffer;    # gtk source buffer used to display lexicals vars
-my $subsBuffer;		   # buffer to display subs
-my $filesBuffer;	   # buffer to display files
-my $breakpointsBuffer; # buffer to display breakpoints
-my %sourceBuffers;     # hash of source code buffers indexed by filename
-my $ctx;               # the GTK main loop context
-my $searchSettings;
-my $searchCtx;
+our %widgets;           # UI widgets indexed by widget id
+our %sourceBuffers;     # hash of source code buffers indexed by filename
+our $searchCtx;         # current search context
 
 
-# INT signal handler
+# INT POSIX signal handler
 sub dbint_handler {
 
-    $quit = 1;
+    App::quit(1);
 }
 
 ##################################################
-# main UI action handlers
+# Gtk Actions
+#
+# these are the high level action events
+# like choosing a command from the menu
+# or pressing one of the toolbar buttons
 ##################################################
 
-# run command - continue until next breakpoint
+package App::Actions;
+use base "App::ActionHandler";
+
+use File::Basename;
+
 sub onRun {
 
-    $fifo->write("continue");
-    enableButtons(0);
+    $App::fifo->write("continue");
+    App::enableButtons(0);
 }
 
 # single step, recursing into functions
 sub onStep {
 
-    $fifo->write("step");
-    enableButtons(0);
+    $App::fifo->write("step");
+    App::enableButtons(0);
 }
 
 # single step, jumping over functions
 sub onOver {
 
-    $fifo->write("next");
-    enableButtons(0);
+    $App::fifo->write("next");
+    App::enableButtons(0);
 }
 
 # step out of current function, continue stepping afterwards
 sub onOut {
 
-    $fifo->write("return");
-    enableButtons(0);
+    $App::fifo->write("return");
+    App::enableButtons(0);
 }
 
 # stop button pressed - interrupt the debugger
 sub onStop {
 
-    #	print "KILL $pid\n";
-	if(!$ENV{"GDBG_KILL_CMD"}) {
+	App::sendSignal('INT');
+}
 
-	    kill 'INT', $pid;
-	}
-	else {
+# user selected open-file from menu
+sub onOpen {
 
-		system($ENV{"GDBG_KILL_CMD"}." $pid");
+	$App::widgets{fileChooserDialog}->show;
+}
+
+# user selected 'Goto current line' from File Menu
+sub onScroll {
+
+    App::scroll($App::currentFile,$App::currentLine);
+}
+
+# user selected 'Show Lexicals' from file menu
+sub onLexicals {
+
+    $App::fifo->write("lexicals");
+}
+
+# show breakpoints window menu handler
+sub onBreakpoints {
+
+    $App::fifo->write("breakpoints");
+}
+
+# show subroutines window menu handler
+sub onSubs {
+
+    $App::fifo->write("functions");
+}
+
+# show files view
+sub onFiles {
+
+	my @files = keys %App::files;
+	my @sorted = sort(@files);
+	my $text = join("\n", @sorted);
+
+	$App::widgets{filesBuffer}->set_text($text,-1);
+
+	$App::widgets{sourceView}->set_buffer($App::widgets{filesBuffer});
+	$App::widgets{mainWindow}->set_title("Files loaded by the debugger:");
+}
+
+# user selected theme from Themes menu
+sub onTheme :Detail {
+
+	my ($action,$target) = @_;
+    my $label = $target->get_string();
+
+    my $manager = Gtk::Source::StyleSchemeManager::get_default();
+    my $scheme = $manager->get_scheme($label);
+	$App::widgets{scheme} = $scheme;
+
+    foreach my $key ( keys %App::sourceBuffers ) {
+
+        $App::sourceBuffers{$key}->set_style_scheme($scheme);
+    }
+	
+	$App::widgets{infoBuffer}->set_style_scheme($scheme);;        
+	$App::widgets{lexicalsBuffer}->set_style_scheme($scheme);;    
+	$App::widgets{subsBuffer}->set_style_scheme($scheme);;		
+	$App::widgets{filesBuffer}->set_style_scheme($scheme);;	   
+	$App::widgets{breakpointsBuffer}->set_style_scheme($scheme);; 
+}
+
+# user selects source from Sources Menu
+sub onWindow :Detail {
+
+	my ($action,$target) = @_;
+    my $path = $target->get_string();
+
+    $App::openFile = $path;
+
+    $App::widgets{sourceView}->set_buffer( $App::sourceBuffers{$App::openFile} );
+    $App::widgets{mainWindow}->set_title(basename($path));
+	$App::widgets{statusBar}->set_text(basename($path));
+	$App::widgets{statusBar}->set_tooltip_text($path);
+}
+
+##################################################
+# Gtk Signal Handlers
+#
+# lower level event handlers
+##################################################
+package App::Handlers;
+
+use File::Basename;
+
+# user has chosen file in FileChooser Dialog
+sub onFileOpenResponse 
+{
+	my ($widget,$response) = @_;
+	if ($response == -3 ) # accept
+	{
+		my $file = $widget->get_file;
+		my $path = $file->get_path;
+
+		App::openFile($path);
 	}
 }
 
 # user entered return in eval entry
 sub onEval {
 
-    my $e = $widgets{evalEntry}->get_text();
-
-    $fifo->write("eval $e");
-}
-
-
-# user selected open-file from menu
-sub onOpen {
-
-    # show open file dialog
-    my $dlg = Gtk3::FileChooserNative->new( 
-		"Open File", 
-		$widgets{mainWindow}, 
-		'open',
-        "OK", 
-		"Cancel" 
-	);
-
-    my $r = $dlg->run();
-    if ( $r == -3 ) {    # accept file
-
-        my $fn = $dlg->get_filename();
-        openFile($fn);
-    }
-}
-
-# user selected 'Goto current line' from File Menu
-sub onScroll {
-
-    scroll($currentFile,$currentLine);
+    my $e = $App::widgets{evalEntry}->get_text();
+    $App::fifo->write("eval $e");
 }
 
 # set a breakpoint UI handler (click on marker of sourceView)
 sub onMarker {
-    my ( $self, $iter, $event ) = @_;
+    my ( $widget, $iter, $event ) = @_;
 
 	# only allow setting breakpoints when interactive
-	if($uiDisabled) {
+	if($App::uiDisabled) {
 		return;
 	}
 
 	# if we are not looking at a source file, no breaktpoints
-	if( $widgets{sourceView}->get_buffer() eq $subsBuffer ||
-		$widgets{sourceView}->get_buffer() eq $infoBuffer ||
-		$widgets{sourceView}->get_buffer() eq $breakpointsBuffer ||
-		$widgets{sourceView}->get_buffer() eq $filesBuffer) 
+	if( $App::widgets{sourceView}->get_buffer() == $App::widgets{subsBuffer} ||
+		$App::widgets{sourceView}->get_buffer() == $App::widgets{infoBuffer} ||
+		$App::widgets{sourceView}->get_buffer() == $App::widgets{breakpointsBuffer} ||
+		$App::widgets{sourceView}->get_buffer() == $App::widgets{filesBuffer} ) 
 	{
 		return;
 	}
 
 	# get line and filename
     my $line = $iter->get_line() + 1;
-    my $filename = $openFile;
+    my $filename = $App::openFile;
 
     # cannot set break points in eval code
     if ( $filename =~ /^\(eval/ ) {
@@ -209,7 +224,7 @@ sub onMarker {
     }
 
 	# get line of text, skip over some obviously non-breakable lines
-	my $text = getLine($iter,$sourceBuffers{$filename},$line);
+	my $text = App::getLine($iter,$App::sourceBuffers{$filename},$line);
 	if( !$text || $text eq "" || 
 	    $text =~ /^\s*((use)|(no)|(require)|(package)|#)/ ||
 		$text =~ /^\s+$/ ) 
@@ -219,155 +234,93 @@ sub onMarker {
 
 	# set breakpoints and notify debugger process
     my $bpn = $filename . ":" . $line;
-    if ( $breakpoints{$bpn} ) {    # breakpoint already exists, remove it
-        $sourceBuffers{$filename}->delete_mark( $breakpoints{$bpn} );
-        delete $breakpoints{$bpn};
-        $fifo->write("delbreakpoint $filename.",".$line");
+    if ( $App::breakpoints{$bpn} ) {    # breakpoint already exists, remove it
+        $App::sourceBuffers{$filename}->delete_mark( $App::breakpoints{$bpn} );
+        delete $App::breakpoints{$bpn};
+        $App::fifo->write("delbreakpoint $filename.",".$line");
     }
     else {
-        $fifo->write("breakpoint $filename,$line");
+        $App::fifo->write("breakpoint $filename,$line");
     }
 }
 
-# user selected 'Show Lexicals' from file menu
-sub onLexicals {
-
-    my $e = $widgets{evalEntry}->get_text();
-
-    $fifo->write("lexicals");
-}
-
-# show breakpoints window menu handler
-sub onBreakpoints {
-
-    $fifo->write("breakpoints");
-}
-
-# show subroutines window menu handler
-sub onSubs {
-
-    $fifo->write("functions");
-}
 
 # user clicks the call frame stack
 sub onInfoPaneClick {
 
-	my $widget = shift;
-	my $event = shift;
+	my $controller = shift;
+	my $nPress 	   = shift;
+	my $x          = shift;
+	my $y          = shift;
 
-	if($uiDisabled) {
+	if($App::uiDisabled) {
 		return;
 	}
 
-	my $text = getLineFromMouseClick($widget,$event);
+	my $text = App::getLineFromMouseClick($App::widgets{infoPane},$x,$y);
 	if( $text =~ /[^\[]+\[([^\[]+):([0-9]+)\]/ ) {
 
 		my $file = $1;
 		my $line = $2;
-		scroll($file,$line);
+		App::scroll($file,$line);
 	}
 }
 
 # mouse click on a line, if on breakpoints, files or subroutines view
 sub onClick {
 
-	my $widget = shift;
-	my $event  = shift;
+	my $controller = shift;
+	my $nPress 	   = shift;
+	my $x          = shift;
+	my $y          = shift;
 
-	if($uiDisabled) {
+	if($App::uiDisabled) {
 		return;
 	}
 
-	my $text = getLineFromMouseClick($widget,$event);
+	my $text = App::getLineFromMouseClick($App::widgets{sourceView},$x,$y);
 	if(!$text) { 
 		return; 
 	}
 
-	if($widgets{sourceView}->get_buffer() eq $subsBuffer) {
+	if($App::widgets{sourceView}->get_buffer()== $App::widgets{subsBuffer}) {
 
-		$fifo->write("functionbreak $text");
+		$App::fifo->write("functionbreak $text");
 		return;
 	}
-	elsif($widgets{sourceView}->get_buffer() eq $breakpointsBuffer) {
+	elsif($App::widgets{sourceView}->get_buffer() == $App::widgets{breakpointsBuffer}) {
 
 		if ( $text =~ /^#/) { return; }
 		if ($text =~ /([^:]+):([0-9]+)/ ) {
 			my $file = $1;
 			my $line = $2;
-			scroll($file,$line);
+			App::scroll($file,$line);
 		}
 		return;
 	}
-	elsif($widgets{sourceView}->get_buffer() eq $filesBuffer) {
+	elsif($App::widgets{sourceView}->get_buffer() == $App::widgets{filesBuffer}) {
 
-		openFile($text,1);
+		App::openFile($text,1);
 		return;
 	}
 }
 
-# show files view
-sub onFiles {
-
-	my @files = keys %files;
-	my @sorted = sort(@files);
-	my $text = join("\n", @sorted);
-
-	$filesBuffer->set_text($text,-1);
-
-	$widgets{sourceView}->set_buffer($filesBuffer);
-	$widgets{mainWindow}->set_title("Files loaded by the debugger:");
-}
-
-# user selected theme from Themes menu
-sub onTheme {
-    my ($menuItem) = @_;
-    my $label = $menuItem->get_label();
-
-    my $manager = Gtk::Source::StyleSchemeManager::get_default();
-    $scheme = $manager->get_scheme($label);
-
-    foreach my $key ( keys %sourceBuffers ) {
-
-        $sourceBuffers{$key}->set_style_scheme($scheme);
-    }
-	
-	$infoBuffer->set_style_scheme($scheme);;        
-	$lexicalsBuffer->set_style_scheme($scheme);;    
-	$subsBuffer->set_style_scheme($scheme);;		
-	$filesBuffer->set_style_scheme($scheme);;	   
-	$breakpointsBuffer->set_style_scheme($scheme);; 
-}
-
-# user selects source from Sources Menu
-sub onWindow {
-    my ($menuItem) = @_;
-    my $label = $menuItem->get_label();
-
-    $openFile = $label;
-
-    $widgets{sourceView}->set_buffer( $sourceBuffers{$openFile} );
-    $widgets{mainWindow}->set_title(basename($label));
-	$widgets{statusBar}->set_text(basename($label));
-	$widgets{statusBar}->set_tooltip_text($label);
-}
-
 # user closes main window
-sub onDestroy {
+sub onClose {
 
-    kill 'INT', $pid;
-    $quit = 1;
+	App::sendSignal('KILL');
+    App::quit(1);
 }
 
-##################################################
+
 # UI search support
-##################################################
 
 sub onSearch {
 
-	my $widget = shift;
-	my $event = shift;
-
-	my $key = $event->get_keyval();
+	my $controller = shift;
+	my $key        = shift;
+	my $code       = shift;
+	my $state      = shift;
 
 	if($key != Gdk->KEY_Return) {
 		# do default
@@ -375,7 +328,6 @@ sub onSearch {
 	}
 
 	# check for shift key being pressed
-	my ($unused,$state) = $event->get_state();
 
 	my @stateMask = @$state;
 
@@ -387,48 +339,48 @@ sub onSearch {
 		}
 	}
 
-	my $query = $widget->get_text();
+	my $query = $App::widgets{search}->get_text();
 
-	$searchSettings->set_search_text($query);
+	$App::widgets{searchSettings}->set_search_text($query);
 
-print STDERR "SENSI: ".$searchSettings->get_case_sensitive()."\n";
-
-	$searchCtx = Gtk::Source::SearchContext->new(
-		$widgets{sourceView}->get_buffer(),
-		$searchSettings,
+	$App::searchCtx = Gtk::Source::SearchContext->new(
+		$App::widgets{sourceView}->get_buffer(),
+		$App::widgets{searchSettings},
 	);
 
-	$searchCtx->set_highlight(1);
+	$App::searchCtx->set_highlight(1);
 
-	my ($hasSelection,$startIter,$endIter) = $widgets{sourceView}->get_buffer()->get_selection_bounds();
+	my ($hasSelection,$startIter,$endIter) = $App::widgets{sourceView}->get_buffer()->get_selection_bounds();
 	my ($match,$matchStart, $matchEnd) ;
 
 	my $direction = $isShift 
-		? $searchDirection == 'forward' ? 'backward' : 'forward'   
-		: $searchDirection;
-
-print STDERR "SHIFT: $isShift $direction\n";		
-
-	$searchDirection = $direction;
+		? $App::searchDirection eq 'forward' ? 'backward' : 'forward'   
+		: $App::searchDirection;
 
 	if($direction eq 'forward' ) {
 
 		my $searchIter = $endIter;	
 		$searchIter->forward_char();
 
-		($match,$matchStart, $matchEnd) = $searchCtx->forward($searchIter);
+		($match,$matchStart, $matchEnd) = $App::searchCtx->forward($searchIter);
 	}
 	else {
 		my $searchIter = $startIter;	
-		($match,$matchStart, $matchEnd) = $searchCtx->backward($searchIter);
+		($match,$matchStart, $matchEnd) = $App::searchCtx->backward($searchIter);
 	}
 
 	if($match) {
 
-		my $buf = $widgets{sourceView}->get_buffer();
+		my $buf = $App::widgets{sourceView}->get_buffer();
 		$buf->select_range($matchStart,$matchEnd);
 
-		$widgets{sourceView}->scroll_to_iter( $matchStart, 0, 1, 0.5, 0.5 );		
+ 		$App::widgets{sourceView}->get_buffer()->place_cursor($matchStart);
+
+		$App::widgets{sourceView}->scroll_to_iter( $matchStart, 0, 1, 0.5, 0.5 );		
+
+		my $line = $matchStart->get_line() +1;
+		$App::widgets{statusBar}->set_text(basename($App::openFile).":".$line);
+
 	}
 
 	return 1;
@@ -436,46 +388,73 @@ print STDERR "SHIFT: $isShift $direction\n";
 
 sub onCancelSearch {
 
-	my $widget = shift;
-	my $event = shift;
+	my $controller = shift;
 
-	if($event->button->{type} eq 'button-press') {
+	my $button = $controller->get_current_button();	
 
-		# left click
-		if($event->button->{button} == 1) {
+	# left click
+	if($button == 1) {
 
-			if($searchCtx) {
+		if($App::searchCtx) {
 
-				$searchCtx->set_highlight(0);
-			}
-
-			$widgets{search}->set_text("");
+			$App::searchCtx->set_highlight(0);
 		}
-		# right click
-		if($event->button->{button} == 3) {
 
-			my $dialog = $widgets{searchDialog};
+		$App::widgets{search}->set_text("");
+	}
 
-			my $active = $searchDirection eq 'forward' ? 1 : 0;
-			print STDERR "A: $active\n";
-			$widgets{searchForward}->set_active($active);
-			$widgets{searchBackward}->set_active(!$active);
+	# right click
+	if($button == 3) {
 
-			$dialog->set_transient_for($widgets{mainWindow});
-			$dialog->set_modal(1);
-			$dialog->show_all;
-		}
+		my $dialog = $App::widgets{searchDialog};
+
+		my $active = $App::searchDirection eq 'forward' ? 1 : 0;
+		$App::widgets{searchForward}->set_active($active);
+		$App::widgets{searchBackward}->set_active(!$active);
+
+		$dialog->set_transient_for($App::widgets{mainWindow});
+		$dialog->set_modal(1);
+		$dialog->show;
 	}
 }
 
-# search dialog events
+# search settings dialog
 
-sub onSearchDialogClose {
+sub onSearchBackward {
+
+	$App::searchDirection = 'backward';
+}
+
+sub onSearchForward {
+
+	$App::searchDirection = 'forward';
+}
+
+sub onSearchSensitive {
 
 	my $widget = shift;
-	my $event = shift;
+	my $event  = shift;
 
-	$widget->hide;
+	my $active = $widget->get_active;
+	$App::widgets{searchSettings}->set_case_sensitive($active);
+}
+
+sub onSearchWordBoundaries  {
+
+	my $widget = shift;
+	my $event  = shift;
+
+	my $active = $widget->get_active;
+	$App::widgets{searchSettings}->set_at_word_boundaries ($active);
+}
+
+sub onSearchRegexEnabled  {
+
+	my $widget = shift;
+	my $event  = shift;
+
+	my $active = $widget->get_active;
+	$App::widgets{searchSettings}->set_regex_enabled ($active);
 }
 
 sub onSearchDialogDelete {
@@ -483,263 +462,185 @@ sub onSearchDialogDelete {
 	my $widget = shift;
 	my $event = shift;
 
+	$widget->hide;
 	return 1;
 }
 
-sub onSearchBackward {
-
-	my $widget = shift;
-	my $event = shift;
-
-	$searchDirection = 'backward';
-}
-
-sub onSearchForward {
-
-	my $widget = shift;
-	my $event = shift;
-
-	$searchDirection = 'forward';
-}
-
-sub onSearchSensitive {
-
-	my $widget = shift;
-	my $event = shift;
-
-	my $value = $widget->get_active;
-print STDERR "SetSensi $value\n";	
-	$searchSettings->set_case_sensitive($value);
-}
-
-sub onSearchWordBoundaries {
-
-	my $widget = shift;
-	my $event = shift;
-
-	my $value = $widget->get_active;
-	$searchSettings->set_at_word_boundaries ($value);
-}
-
-sub onSearchRegexEnabled {
-
-	my $widget = shift;
-	my $event = shift;
-
-	my $value = $widget->get_active;
-	$searchSettings->set_regex_enabled ($value);
-}
-
-
 ##################################################
-# process messages from debugger
+# FIFO Message Handlers
+#
+# these are command received from
+# the debugger in the debugged process
 ##################################################
 
-my @msg_handlers = (
-	{
-		# quit debugger
-		regex   => qr/^quit$/s,
-		handler => sub {
-			$quit = 2;
-		}
-	},
-	{
-		# set current work directory
-		regex   => qr/^cwd (,*)/s,
-		handler => sub {
+package App::Messages;
+use base 'App::MsgHandler';
 
-			$widgets{statusBar}->set_text($1);
-			chdir $1;
-		}
-	},
-	{
-		# process id (pid) of dubugger process
-		regex   => qr/^pid (.*)$/s,
-		handler => sub {
+sub quit :Regex() {
 
-			$pid = $1;
+	App::quit(2);
+}
 
-			foreach my $bp ( keys %breakpoints) {
-				$fifo->write("breaktpoint $bp")
-			}
-		}
-	},
-	{
-		# display file at line
-		regex   => qr/^file ([^,]+),([0-9]*)/s,
-		handler => sub {
+sub cwd :Regex((.*)) {
 
-			my $file = $1;
-			my $line = $2;
+	my $path = shift;
 
-			$currentLine = $line;
-			$currentFile = $file;
+	$App::widgets{statusBar}->set_text($path);
+	chdir $1;
+}
 
-			scroll($file,$line);
-			enableButtons(1);		
-		}
-	},
-	{
-		# show file at line (like display above)
-		# but do not set current file
-		regex   => qr/^show ([^,]+),([0-9]*)/s,
-		handler => sub {
+sub pid :Regex((.*)) {
 
-			my $file = $1;
-			my $line = $2;
+	my $pid = shift;
+	App::setPID($pid);
 
-			scroll($file,$line);
-			enableButtons(1);		
-		}
-	},
-	{
-		# display call stack info
-		regex   => qr/^info ([^,]+),([0-9]*),(.*)/s,
-		handler => sub {
+	foreach my $bp ( keys %App::breakpoints) {
+		$App::fifo->write("breaktpoint $bp")
+	}
+}
 
-			my $file = $1;
-			my $line = $2;
-			my $info = $3;
+sub file :Regex(([^,]+),([0-9]*)) {
 
-			$currentLine = $line;
-			$currentFile = $file;
+	my $file = shift;
+	my $line = shift;
 
-			$infoBuffer->set_text( $info, -1 );		
-		}
-	},
-	{
-		# display lexicals
-		regex   => qr/^lexicals ([^,]+),([0-9]*),(.*)/s,
-		handler => sub {
+	$App::currentLine = $line;
+	$App::currentFile = $file;
 
-			my $file = $1;
-			my $line = $2;
-			my $info = $3;
+	App::scroll($file,$line);
+	App::enableButtons(1);		
+}
 
-			$lexicalsBuffer->set_text( $info, -1 );
-			$widgets{sourceView}->set_buffer($lexicalsBuffer);
-			$widgets{mainWindow}->set_title("All current lexical variables:");
-		}
-	},
-	{
-		# display breakpoints
-		regex   => qr/^breakpoints (.*)/s,
-		handler => sub {
+sub show :Regex(([^,]+),([0-9]*)) {
 
-			my $info = $1;
+	my $file = shift;
+	my $line = shift;
 
-			$breakpointsBuffer->set_text( $info, -1 );
-			$widgets{sourceView}->set_buffer($breakpointsBuffer);
-			$widgets{mainWindow}->set_title("All breakpoints currently set:");
-		}
-	},
-	{
-		# set a marker at file:line
-		regex   => qr/^marker ([^,]+),([0-9]*)/s,
-		handler => sub {
+	App::scroll($file,$line);
+	App::enableButtons(1);		
+}
 
-			my $file = $1;
-			my $line = $2;
+sub info :Regex(([^,]+),([0-9]*),(.*)) {
 
-			my $bpn = $file . ":" . $line;
+	my $file = shift;
+	my $line = shift;
+	my $info = shift;
 
-			my $buf = $sourceBuffers{$file};
-			if (!$buf) {
+	$App::currentLine = $line;
+	$App::currentFile = $file;
 
-				$buf = loadBuffer($file,$line);
-			}
+	$App::widgets{infoBuffer}->set_text( $info, -1 );			
+}
+
+sub lexicals :Regex(([^,]+),([0-9]*),(.*)) {
+
+	my $file = shift;
+	my $line = shift;
+	my $info = shift;
+
+	$App::widgets{lexicalsBuffer}->set_text( $info, -1 );
+	$App::widgets{sourceView}->set_buffer($App::widgets{lexicalsBuffer});
+	$App::widgets{mainWindow}->set_title("All current lexical variables:");
+}
+
+sub breakpoints :Regex((.*)) {
+
+	my $info = shift;
+
+	$App::widgets{breakpointsBuffer}->set_text( $info, -1 );
+	$App::widgets{sourceView}->set_buffer($App::widgets{breakpointsBuffer});
+	$App::widgets{mainWindow}->set_title("All breakpoints currently set:");
+}
+
+sub marker :Regex(([^,]+),([0-9]*)) {
+
+	my $file = shift;
+	my $line = shift;
+
+	my $bpn = $file . ":" . $line;
+
+	my $buf = $App::sourceBuffers{$file};
+	if (!$buf) {
+
+		$buf = App::loadBuffer($file,$line);
+	}
+
+	my $iter = $buf->get_iter_at_line( $line - 1 );
+	if ( !$App::breakpoints{$bpn} ) { # only if not exists
+		my $mark = $App::sourceBuffers{$file}
+			->create_source_mark( $bpn, "error", $iter );
+		$App::breakpoints{$bpn} = $mark;
+	}
+}
+
+sub rmarker :Regex(([^,]+),([0-9]*)) {
+
+	my $file = shift;
+	my $line = shift;
+
+	my $bpn = $file . ":" . $line;
+	if ( $App::breakpoints{$bpn} ) {   
+		
+		# only if already exists
+		my $buf = $App::sourceBuffers{$file};
+		if ($buf) {
 
 			my $iter = $buf->get_iter_at_line( $line - 1 );
-			if ( !$breakpoints{$bpn} ) { # only if not exists
-				my $mark = $sourceBuffers{$file}
-					->create_source_mark( $bpn, "error", $iter );
-				$breakpoints{$bpn} = $mark;
-			}
-		}
-	},
-	{
-		# remove a marker at file:line
-		regex   => qr/^rmarker ([^,]+),([0-9]*)/s,
-		handler => sub {
 
-			my $file = $1;
-			my $line = $2;
-
-			my $bpn = $file . ":" . $line;
-			if ( $breakpoints{$bpn} ) {   
-				
-				# only if already exists
-				my $buf = $sourceBuffers{$file};
-				if ($buf) {
-
-					my $iter = $buf->get_iter_at_line( $line - 1 );
-
-					$sourceBuffers{$file}->delete_mark($breakpoints{$bpn});
-					delete $breakpoints{$bpn};
-				}
-			}
-		}
-	},
-	{
-		# load file,line,source
-		regex   => qr/^load ([^,]+),([0-9]+),(.*)/s,
-		handler => sub {
-
-			my $file = $1;
-			my $line = $2;
-			my $src  = $3;
-			$widgets{statusBar}->set_text("$file");
-
-			$files{$file} = $src;
-			if ( $file !~ /^\/usr\// ) {
-				scroll($file,$line);
-			}
-		}
-	},
-	{
-		# eval results passed as string
-		regex   => qr/^eval (.*)/s,
-		handler => sub {
-
-			my $evaled = $1;
-			$lexicalsBuffer->set_text( $evaled, -1 );
-			$widgets{sourceView}->set_buffer($lexicalsBuffer);
-		}
-	},
-	{
-		# all known subroutines for display
-		regex   => qr/^subs (.*)/s,
-		handler => sub {
-
-			my $subs = $1;
-			$subsBuffer->set_text( $subs, -1 );
-			$widgets{sourceView}->set_buffer($subsBuffer);
-			$widgets{mainWindow}->set_title("All subroutines loaded:");
-		}
-	},
-);
-
-sub process_msg {
-
-    my $msg = shift;
-
-    #print "MSG: ".substr($msg,0,60)."\n";
-
-	foreach my $handler ( @msg_handlers) {
-		if ( $msg =~ $handler->{regex} ) {
-			$handler->{handler}->();
-			return;
+			$App::sourceBuffers{$file}->delete_mark($App::breakpoints{$bpn});
+			delete $App::breakpoints{$bpn};
 		}
 	}
 }
 
+sub load :Regex(([^,]+),([0-9]*),(.*)) {
+
+	my $file = shift;
+	my $line = shift;
+	my $src  = shift;
+
+	$App::widgets{statusBar}->set_text("$file");
+	$App::files{$file} = $src;
+	App::scroll($file,$line);	
+}
+
+sub evaluate :Regex((.*)) {
+
+	my $evaled = shift;
+
+	$App::widgets{lexicalsBuffer}->set_text( $evaled, -1 );
+	$App::widgets{sourceView}->set_buffer($App::widgets{lexicalsBuffer});
+}
+
+sub subs :Regex((.*)) {
+
+	my $subs = shift;
+
+	$App::widgets{subsBuffer}->set_text( $subs, -1 );
+	$App::widgets{sourceView}->set_buffer($App::widgets{subsBuffer});
+	$App::widgets{mainWindow}->set_title("All subroutines loaded:");
+}
+
 ##################################################
-# logic
+# The Debugger UI Application
 ##################################################
 
+package App;
+
+my $langManager;       # gtsk source language manager
+my $lang;              # gtk source view language (perl)
+my $ctx;               # the GTK main loop context
+my $pid   = 0;    	   # process ID of debugger process, to be signalled
+my $quit  = 0;         # stop the UI
+
+sub quit {
+	my $value = shift;
+	$quit = $value;
+}
 
 # open a new file in the visual debugger
 sub openFile {
+
     my $filename = shift;
     my $line     = shift;
 
@@ -787,11 +688,6 @@ sub openFile {
     }	
 }
 
-
-##################################################
-# UI helpers
-##################################################
-
 # load a file into a new source buffer
 sub loadBuffer {
 
@@ -820,18 +716,15 @@ sub loadBuffer {
 	# create GTK source buffer with content
 	my $buf = Gtk::Source::Buffer->new();
 	$buf->set_language($lang);
-	$buf->set_style_scheme($scheme);
+	$buf->set_style_scheme($App::widgets{scheme});
 	if ($content) {
 		$buf->set_text( $content, -1 );
 	}
 	$sourceBuffers{$file} = $buf;
 
 	# add a menu item to the windows menu
-	my $item = Gtk3::MenuItem->new_with_label($file);
-	$item->signal_connect( 'activate' => \&onWindow );
-
-	$widgets{windowMenu}->add($item);
-	$widgets{windowMenu}->show_all();
+	my $menuItem = Glib::IO::MenuItem->new(basename($file),"win.onWindow('$file')");#::/tmp/file.txt");
+	$widgets{sourceMenu}->append_item($menuItem);  		
 
 	return $buf;
 }
@@ -849,6 +742,7 @@ sub getSource {
 
 # get a line of text from buffer
 sub getLine {
+
 	my $iter = shift;
 	my $buffer = shift;
 	my $line = shift;
@@ -867,17 +761,15 @@ sub getLine {
 sub getLineFromMouseClick {
 
 	my $widget = shift;
-	my $event  = shift;
-
-	# relative mouse position
-	my ($r,$x,$y) = $event->get_coords();
+	my $x  = shift;
+	my $y  = shift;
 
 	# get scroll adjustement
 	my $pos = $widget->get_vadjustment()->get_value();
 	$y += $pos; # reflect scrolling offset
 
 	# now ask for iter
-	my ($r,$iter) = $widget->get_iter_at_position($x,$y);
+	my ($r2,$iter) = $widget->get_iter_at_position($x,$y);
 	$iter->forward_line();
 
 	# get the line from the iter, (which is line+1)
@@ -906,11 +798,12 @@ sub enableButtons {
     $widgets{buttonLexicals}->set_sensitive($state);
     $widgets{buttonHome}->set_sensitive($state);
     $widgets{evalEntry}->set_sensitive($state);
-    $widgets{lexicalsMenu}->set_sensitive($state);
-    $widgets{breakpointsMenu}->set_sensitive($state);
-    $widgets{openFileMenu}->set_sensitive($state);
-    $widgets{showSubsMenu}->set_sensitive($state);
-    $widgets{showFilesMenu}->set_sensitive($state);
+
+	$App::Builder::actions{onLexicals}->set_enabled($state);	
+	$App::Builder::actions{onBreakpoints}->set_enabled($state);	
+	$App::Builder::actions{onOpen}->set_enabled($state);	
+	$App::Builder::actions{onSubs}->set_enabled($state);	
+	$App::Builder::actions{onFiles}->set_enabled($state);	
 
     $widgets{buttonStop}->set_sensitive( $state ? 0 : 1 );
 }
@@ -922,7 +815,7 @@ sub updateInfo {
 
     $widgets{mainWindow}->set_title( $filename . ":" . $line );
 
-    $infoBuffer->set_text( $info, -1 );
+    $widgets{infoBuffer}->set_text( $info, -1 );
 }
 
 # scroll to currently debugged line
@@ -950,53 +843,49 @@ sub scroll {
     }
 }
 
-##################################################
+sub setPID {
+	
+	my $id = shift;
+	$pid = $id;
+}
+
+sub sendSignal {
+
+	my $signal = shift;
+
+	if(!$ENV{"GDBG_KILL_CMD"}) {
+
+	    kill $signal, $pid;
+	}
+	elsif ($signal ne 'KILL') { 
+
+		system($ENV{"GDBG_KILL_CMD"}."$signal $pid");
+	}
+}
+
 # build the ui once using gtk builder
-##################################################
 
-sub mapWidgets {
-
-    my $builder = shift;
-
-    my @widgetNames = qw(
-      mainWindow statusBar
-      windowMenu themesMenu
-      lexicalsMenu breakpointsMenu
-	  showSubsMenu showFilesMenu
-      openFileMenu evalEntry
-      sourceView infoPane
-      openFile scrollMenu lexicalsMenu
-      buttonRun buttonStep buttonOver
-      buttonOut buttonStop buttonLexicals
-      buttonHome search searchDialog
-	  searchBackward searchForward
-    );
-
-    foreach my $wn (@widgetNames) {
-
-        my $widget = $builder->get_object($wn);
-        $widgets{$wn} = $widget;
-    }
-}
-
-sub connect_signals {
-
-    my ( $builder, $obj, $signal, $handler, $co, $flags, $data ) = @_;
-
-    $obj->signal_connect( $signal => \&$handler );
-}
+my @widgetNames = qw(
+	mainWindow statusBar windowMenu themesMenu
+	lexicalsMenu breakpointsMenu showSubsMenu showFilesMenu
+	openFileMenu evalEntry sourceView infoPane
+	openFile scrollMenu lexicalsMenu buttonRun buttonStep buttonOver
+	buttonOut buttonStop buttonLexicals buttonHome search searchDialog
+	searchBackward searchForward themeMenu sourceMenu cancelSearch
+);
 
 sub build_ui {
 
-	# load widgets from xml
-    my $builder = Gtk3::Builder->new();
-    $builder->add_from_file($uixml) or die 'file not found';
+	%widgets = App::Builder::build_ui( $uixml, \@widgetNames);
 
-	# get refrences to widgets
-    mapWidgets($builder);
+	my $mainWindow = $widgets{mainWindow};
 
-	# connect UI signal handlers
-    $builder->connect_signals_full( \&connect_signals, 0 );
+	App::Builder::add_actions( $mainWindow );
+
+	App::Builder::add_key_controller( $widgets{search}, "key-pressed", \&App::Handlers::onSearch );
+	App::Builder::add_mouse_controller( $widgets{infoPane}, "pressed", \&App::Handlers::onInfoPaneClick );
+	App::Builder::add_mouse_controller( $widgets{cancelSearch}, "pressed", \&App::Handlers::onCancelSearch );
+	App::Builder::add_mouse_controller( $widgets{sourceView}, "pressed", \&App::Handlers::onClick );
 
 	# Perl syntax highlighting support
     $langManager = Gtk::Source::LanguageManager->new();
@@ -1018,61 +907,74 @@ sub build_ui {
 	# populate schemes menu
     my $themes = $manager->get_property("scheme-ids");
     foreach my $theme (@$themes) {
-        my $item = Gtk3::MenuItem->new_with_label($theme);
-        $item->signal_connect( 'activate' => \&onTheme );
-        $widgets{themesMenu}->add($item);
+
+	    my $menuItem = Glib::IO::MenuItem->new("$theme","win.onTheme('$theme')");#::/tmp/file.txt");
+  		$widgets{themeMenu}->append_item($menuItem);  		
     }
 
 	# default schema
-    $scheme = $manager->get_scheme("solarized-dark");
+    my $scheme = $manager->get_scheme("solarized-dark");
+	$widgets{scheme} = $scheme;
 
-	# preapre the info buffer to display call stack
-    $infoBuffer = $widgets{infoPane}->get_buffer();
+	# prepare the info buffer to display call stack
+    my $infoBuffer = $widgets{infoPane}->get_buffer();
     $widgets{infoPane}->set_editable(0);
     $infoBuffer->set_style_scheme($scheme);
+	$widgets{infoBuffer} = $infoBuffer;
 
 	# prepare the lexical vars display buffer
-    $lexicalsBuffer = Gtk::Source::Buffer->new();
+    my $lexicalsBuffer = Gtk::Source::Buffer->new();
     $lexicalsBuffer->set_language($lang);
     $lexicalsBuffer->set_style_scheme($scheme);
+	$widgets{lexicalsBuffer} = $lexicalsBuffer;
 
 	# buffer to show loaded subroutines
-    $subsBuffer = Gtk::Source::Buffer->new();
+    my $subsBuffer = Gtk::Source::Buffer->new();
     $subsBuffer->set_style_scheme($scheme);
+	$widgets{subsBuffer} = $subsBuffer;
 
 	# buffer to show loaded files
-    $filesBuffer = Gtk::Source::Buffer->new();
+    my $filesBuffer = Gtk::Source::Buffer->new();
     $filesBuffer->set_style_scheme($scheme);
+	$widgets{filesBuffer} = $filesBuffer;
 
 	# buffer to show loaded breakpoints
-    $breakpointsBuffer = Gtk::Source::Buffer->new();
+    my $breakpointsBuffer = Gtk::Source::Buffer->new();
     $breakpointsBuffer->set_style_scheme($scheme);
+	$widgets{breakpointsBuffer} = $breakpointsBuffer;
 
 	# prepare search support
-	$searchSettings = Gtk::Source::SearchSettings->new();
+	my $searchSettings = Gtk::Source::SearchSettings->new();
 	$searchSettings->set_wrap_around(1);
 	$searchSettings->set_regex_enabled(1);
 	$searchSettings->set_case_sensitive(0);
+	$widgets{searchSettings} = $searchSettings;
 	
 	# set everything to disabled on startup
     enableButtons(0);
     $widgets{buttonStop}->set_sensitive(0);
 
+	# preload filechooser
+    my $fileChooserDialog = Gtk::FileChooserNative->new (
+		"Open File",
+		$mainWindow,
+		"open",
+		"_Open",
+		"_Cancel"
+	);
+
+	$fileChooserDialog->signal_connect( "response", \&App::Handlers::onFileOpenResponse);
+	$widgets{fileChooserDialog} = $fileChooserDialog;
+
     # show the UI
-    $widgets{mainWindow}->show_all();
+    $widgets{mainWindow}->show();
 }
 
-##################################################
-# initialize
-##################################################
+# initialize IPC with debugger process
 
 sub initialize {
 
-    Gtk3::init();
-
-    $ctx = GLib::MainContext::default();
-
-    $SIG{'INT'} = "dbgui::dbint_handler";
+    $SIG{'INT'} = "App::dbint_handler";
 
     # the IPC named pipe (fifo) for comms with the debugger
 
@@ -1085,12 +987,14 @@ sub initialize {
     $fifo->open_out("$fifo_dir/perl_debugger_fifo_in");
 }
 
-##################################################
-# THE ui main loop
-##################################################
+# startup
 
 initialize();
 build_ui();
+
+# run the ui loop
+
+$ctx = GLib::MainContext::default();
 
 while ( !$quit ) {
 
@@ -1102,15 +1006,11 @@ while ( !$quit ) {
     # pump debugger IPC messages
     my @msgs = $fifo->read();
     foreach my $msg (@msgs) {
-        process_msg($msg);
+	
+		App::MsgHandler::handle($msg);
     }
 }
-
-##################################################
-# over and out
-##################################################
 
 if ( $quit == 1 ) {
     $fifo->write("quit");
 }
-

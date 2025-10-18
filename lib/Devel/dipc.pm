@@ -103,7 +103,7 @@ sub _read_size {
 
     my $want = 4 - length( $self->{buf} );
 
-    my $n = read( $self->{fin}, $self->{buf}, $want, length( $self->{buf} ) );
+    my $n = CORE::read( $self->{fin}, $self->{buf}, $want, length( $self->{buf} ) );
     if ( $n == 0 ) {
 
         return;
@@ -123,7 +123,7 @@ sub _read_data {
 
     my $want = $self->{datalen} - length( $self->{buf} );
 
-    my $n = read( $self->{fin}, $self->{buf}, $want, length( $self->{buf} ) );
+    my $n = CORE::read( $self->{fin}, $self->{buf}, $want, length( $self->{buf} ) );
     if ( $n == 0 ) {
 
         return;
