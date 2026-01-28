@@ -11,10 +11,12 @@ use strict;
 # Perl dependencies
 ##################################################
 
+use JSON;
 use Data::Dumper;
 use File::Slurp  qw(slurp write_file);
 use File::Basename;
 use FindBin 1.51 qw( $RealBin );
+use Params::Util qw<_HASH _HASH0 _HASHLIKE _ARRAYLIKE>;
 
 # IPC package share with debugger
 use Devel::dipc;
@@ -74,6 +76,7 @@ my %breakpoints;    				  # remember breakpoint markers so we can delete 'em
 my $fifo;           				  # IPC with debugger backend
 my $uiDisabled = 1;					  # flag for UI disabled/enabled
 my $searchDirection = 'forward';
+my $selectedVar = "/";
 
 ##################################################
 # global gtk widgets
@@ -141,8 +144,10 @@ sub onStop {
 	    kill 'INT', $pid;
 	}
 	else {
-
-		system($ENV{"GDBG_KILL_CMD"}." $pid");
+		my $cmd = $ENV{"GDBG_KILL_CMD"};
+		$cmd =~ s/\{\{PI\}\}/$pid/;
+		print STDERR "KILL: $cmd\n";
+		system("bash -c '$cmd'");
 	}
 }
 
@@ -232,10 +237,9 @@ sub onMarker {
 # user selected 'Show Lexicals' from file menu
 sub onLexicals {
 
-    my $e = $widgets{evalEntry}->get_text();
-
     $fifo->write("lexicals");
 }
+
 
 # show breakpoints window menu handler
 sub onBreakpoints {
@@ -317,6 +321,34 @@ sub onFiles {
 	$widgets{sourceView}->set_buffer($filesBuffer);
 	$widgets{mainWindow}->set_title("Files loaded by the debugger:");
 }
+
+# remember last selected var tree row
+sub onRowExpanded {
+
+	my $widget = shift;
+	my $iter   = shift;
+
+	my $model = $widgets{lexicalTreeView}->get_model();
+	my $gval = $model->get_value($iter,2); 
+	$selectedVar = $gval;
+
+	my $first = $model->iter_children($iter);
+	$gval = $model->get_value($first,0); 
+	if( $gval eq '' ) {
+
+		$gval = $model->get_value($first,1); 
+		if( $gval eq '' ) {
+
+			$gval = $model->get_value($iter,2); 
+			$model->remove($first);
+			print STDERR "EXPAND $gval\n";
+			$fifo->write("jsonlexicals $gval");
+		}
+	}
+
+print STDERR "SELECTEDVAL $selectedVar\n";	
+}
+
 
 # user selected theme from Themes menu
 sub onTheme {
@@ -530,6 +562,73 @@ sub onSearchRegexEnabled {
 	$searchSettings->set_regex_enabled ($value);
 }
 
+sub find_root {
+	my ($target,$root) = @_;
+
+	if($target eq '' || $target eq '/') {
+		return {
+			result => $root,
+			found => 1,
+		};
+	}
+
+#	$target =~ s/^\///;
+#	my @t = split( /\//, $target);
+print STDERR "---------$target------------\n";
+	my $model = $widgets{lexicalTreeView}->get_model;
+#	my $p = shift @t;
+
+print STDERR "ROOT: $root\n";
+	my $iter = $model->iter_children($root);
+	while( $iter) {
+print STDERR "ITER: ".Dumper($iter);
+
+		my $gv;
+		eval {
+			$gv = $model->get_value($iter,0);
+print STDERR "# ITEM:".Dumper($gv);			
+			$gv = $model->get_value($iter,2);
+print STDERR "       ".Dumper($gv);			
+		};
+		if($@) {
+
+print STDERR $@."\n";
+print STDERR "NOT FOUND e\n";
+
+			return {
+				found => 0,
+				result => undef,
+			};
+		}
+
+		$gv .= '';
+
+		my $i = index $target, $gv;
+
+print STDERR "$gv =?= $target, $i\n";
+
+		if($i == 0) {
+
+			if($target eq $gv) {
+				return {
+					result => $iter,
+					found => 1,
+				};
+			}
+			else {
+print STDERR "RECURSE\n";				
+				return find_root($target,$iter);
+			}
+		}
+		$model->iter_next($iter);
+		#$iter = $iter2;
+	}
+print STDERR "NOT FOUND\n";
+	return {
+		found => 0,
+		result => undef,
+	};
+}
 
 ##################################################
 # process messages from debugger
@@ -605,6 +704,8 @@ my @msg_handlers = (
 			$currentFile = $file;
 
 			$infoBuffer->set_text( $info, -1 );		
+print STDERR "jsonlexicals $selectedVar\n";			
+			$fifo->write("jsonlexicals /");
 		}
 	},
 	{
@@ -619,6 +720,40 @@ my @msg_handlers = (
 			$lexicalsBuffer->set_text( $info, -1 );
 			$widgets{sourceView}->set_buffer($lexicalsBuffer);
 			$widgets{mainWindow}->set_title("All current lexical variables:");
+		}
+	},
+	{
+		# display lexicals JSON
+		regex   => qr/^jsonlexicals ([^,]+),([^,]*),(.*)/s,
+		handler => sub {
+
+			my $file = $1;
+			my $target = $2;
+			my $info = decode_json($3);
+
+			my $model = $widgets{lexicalTreeView}->get_model;
+			if($target eq '/') {
+				$model->clear;
+			}
+print STDERR "+++++++++++++++++\n";
+print STDERR "$target ".Dumper($info);			
+
+			my $root = undef;#$model->get_iter_first();
+print STDERR "root:".Dumper($root);			
+			my $result = find_root($target,$root);
+			if($result->{found}) {
+print STDERR "FOUND!\n";
+				my $iter = $result->{result};
+print STDERR "FOUND $iter!\n";
+				my $path = '';
+				if($iter) {
+					$path = $model->get_value($iter,2);
+				}
+				populate_lexicals($info,$model,$iter,$path);
+			}
+			else {
+				populate_lexicals($info,$model,$root);
+			}
 		}
 	},
 	{
@@ -723,7 +858,7 @@ sub process_msg {
 
     my $msg = shift;
 
-    #print "MSG: ".substr($msg,0,60)."\n";
+	print "MSG: ".substr($msg,0,60)."\n";
 
 	foreach my $handler ( @msg_handlers) {
 		if ( $msg =~ $handler->{regex} ) {
@@ -877,7 +1012,7 @@ sub getLineFromMouseClick {
 	$y += $pos; # reflect scrolling offset
 
 	# now ask for iter
-	my ($r,$iter) = $widget->get_iter_at_position($x,$y);
+	my ($r2,$iter) = $widget->get_iter_at_position($x,$y);
 	$iter->forward_line();
 
 	# get the line from the iter, (which is line+1)
@@ -950,6 +1085,159 @@ sub scroll {
     }
 }
 
+sub populate_item {
+
+	my ($model,$iter,$key,$item,$path) = @_;
+
+	my $gv = Glib::Object::Introspection::GValueWrapper->new ("Glib::String", $key);
+	$model->set_value($iter,0,$gv);
+
+	$gv = Glib::Object::Introspection::GValueWrapper->new ("Glib::String", $path);
+	$model->set_value($iter,2,$gv);
+
+	if($item->{placeholder}) {
+
+		my $gv = Glib::Object::Introspection::GValueWrapper->new ("Glib::String", $item->{type});
+		$model->set_value($iter,1,$gv);
+
+		my $it = $model->append($iter);
+		$gv = Glib::Object::Introspection::GValueWrapper->new ("Glib::String", '');
+		$model->set_value($it,0,$gv);
+		$model->set_value($it,1,$gv);
+		$model->set_value($it,2,$gv);
+		return;
+	}
+
+	if( $item->{type} eq 'REF' || $item->{type} eq 'SCALAR') {
+		my $gv = Glib::Object::Introspection::GValueWrapper->new ("Glib::String", $item->{value});
+		$model->set_value($iter,1,$gv);
+	}
+	elsif( $item->{type} eq 'CODE' || $item->{type} eq 'IO' || $item->{type} eq 'GLOB'  ) {
+		my $gv = Glib::Object::Introspection::GValueWrapper->new ("Glib::String", $item->{type});
+		$model->set_value($iter,1,$gv);
+	}
+	else {
+		my $gv = Glib::Object::Introspection::GValueWrapper->new ("Glib::String", $item->{type});
+		$model->set_value($iter,1,$gv);
+		if( defined $item->{value} ) {
+			populate_lexicals($item,$model,$iter,$path);
+		}				
+
+print STDERR "xxx $path =?= $selectedVar\n";
+		if( index( $selectedVar, $path) == 0 ) {
+			if($iter) {
+				my $p = $model->get_path($iter);
+				if($p) {
+					print STDERR "---------> expand\n";
+					$widgets{lexicalTreeView}->expand_to_path($p);
+				}
+			}
+		}
+	}
+}
+
+sub populate_lexicals {
+
+	my ($data,$model,$root,$path) = @_;
+
+	if(!$path) {
+		$path = '';
+	}
+
+	my $type = $data->{type};
+	my $value = $data->{value};
+	my $placeholder = $data->{placeholder};
+
+	# if($placeholder) {
+
+	# 	my $iter = $model->append($root);
+	# 	my $gv = Glib::Object::Introspection::GValueWrapper->new ("Glib::String", '');
+	# 	$model->set_value($iter,0,$gv);
+	# 	$model->set_value($iter,1,$gv);
+	# 	$model->set_value($iter,2,$gv);
+	# 	return;
+	# }
+print STDERR "yyy $path =?= $selectedVar\n";
+
+
+	if($type ne 'ARRAY' && $value ne '<unk>' && $value) {
+
+
+			if(!_HASHLIKE($value)) {
+				$value = {};
+			}
+			foreach my $key ( sort keys $value->%* ) {
+
+				my $item = $value->{$key};
+
+				my $iter = $model->append($root);
+
+				populate_item($model,$iter,$key,$item,"$path/$key");			
+			}
+	}
+	else {
+
+#		if(!_ARRAYLIKE($value)) {
+#			$value = [];
+#		}
+
+		my $i = 0;
+		foreach my $item ( $value->@* ) {
+
+			my $iter = $model->append($root);
+			populate_item($model,$iter,"",$item,"$path/$i");			
+			$i++;
+
+
+			# my $iter = $model->append($root);
+
+			# my $gv = Glib::Object::Introspection::GValueWrapper->new ("Glib::String", "");
+			# $model->set_value($iter,0,$gv);
+
+			# $gv = Glib::Object::Introspection::GValueWrapper->new ("Glib::String", $path);
+			# $model->set_value($iter,2,$gv);
+
+			# if( $item->{type} eq 'REF' || $item->{type} eq 'SCALAR') {
+			# 	my $gv = Glib::Object::Introspection::GValueWrapper->new ("Glib::String", $item->{value});
+			# 	$model->set_value($iter,1,$gv);
+			# }
+			# elsif( $item->{type} eq 'CODE' || $item->{type} eq 'IO' || $item->{type} eq 'GLOB'  ) {
+			# 	my $gv = Glib::Object::Introspection::GValueWrapper->new ("Glib::String", $item->{type});
+			# 	$model->set_value($iter,1,$gv);
+			# }
+			# else {
+			# 	my $gv = Glib::Object::Introspection::GValueWrapper->new ("Glib::String", $item->{type});
+			# 	$model->set_value($iter,1,$gv);
+			# 	if( defined $item->{value} ) {
+			# 		populate_lexicals($item,$model,$iter,$path);
+			# 	}
+
+			# 	if( $path eq $selectedVar) {
+			# 		if($iter) {
+			# 			my $p = $model->get_path($iter);
+			# 			if($p) {
+			# 				$widgets{lexicalTreeView}->expand_to_path($p);
+			# 			}
+			# 		}
+			# 	}
+			# }
+		}
+	}
+
+	if( $path && index( $selectedVar, $path) == 0 ) {
+		my $iter = $model->iter_children($root);
+		if($iter) {
+			my $p = $model->get_path($iter);
+			if($p) {
+				my $px = $p->to_string;
+					print STDERR "---------> expand $px\n";
+				$widgets{lexicalTreeView}->expand_to_path($p);
+			}
+		}
+	}
+
+}
+
 ##################################################
 # build the ui once using gtk builder
 ##################################################
@@ -970,6 +1258,7 @@ sub mapWidgets {
       buttonOut buttonStop buttonLexicals
       buttonHome search searchDialog
 	  searchBackward searchForward
+	  lexicalTreeView LexicalTreeStore
     );
 
     foreach my $wn (@widgetNames) {
@@ -987,6 +1276,8 @@ sub connect_signals {
 }
 
 sub build_ui {
+
+print STDERR "build ui\n";
 
 	# load widgets from xml
     my $builder = Gtk3::Builder->new();
@@ -1036,6 +1327,36 @@ sub build_ui {
     $lexicalsBuffer->set_language($lang);
     $lexicalsBuffer->set_style_scheme($scheme);
 
+	my $treeModel = $widgets{LexicalTreeStore};
+	$widgets{lexicalTreeView}->set_model($treeModel);
+
+	my $renderer1 = Gtk3::CellRendererText->new ();
+	my $renderer2 = Gtk3::CellRendererText->new ();
+	my $renderer3 = Gtk3::CellRendererText->new ();
+
+	my $column1 = Gtk3::TreeViewColumn->new();
+	$column1->set_title("Var");
+  	$column1->pack_start($renderer1, 0);	
+	$column1->add_attribute($renderer1,"text",0);
+	$widgets{lexicalTreeView}->append_column( $column1);
+
+	my $column2 = Gtk3::TreeViewColumn->new();
+	$column2->set_title("Info");
+  	$column2->pack_start($renderer2, 0);	
+	$column2->add_attribute($renderer2,"text",1);
+	$widgets{lexicalTreeView}->append_column( $column2 );
+
+	my $column3 = Gtk3::TreeViewColumn->new();
+	$column3->set_title("Path");
+  	$column3->pack_start($renderer3, 0);	
+	$column3->add_attribute($renderer3,"text",2);
+	$widgets{lexicalTreeView}->append_column( $column3 );
+
+	$widgets{lexicalTreeView}->signal_connect( 'row-expanded' => \&onRowExpanded );
+
+	$widgets{lexicalTreeView}->set_enable_tree_lines(1);
+#	$widgets{jsonView}->set_buffer($lexicalsBuffer);
+
 	# buffer to show loaded subroutines
     $subsBuffer = Gtk::Source::Buffer->new();
     $subsBuffer->set_style_scheme($scheme);
@@ -1060,6 +1381,9 @@ sub build_ui {
 
     # show the UI
     $widgets{mainWindow}->show_all();
+
+print STDERR "init ui done\n";
+
 }
 
 ##################################################
@@ -1067,6 +1391,8 @@ sub build_ui {
 ##################################################
 
 sub initialize {
+
+print STDERR "init\n";
 
     Gtk3::init();
 

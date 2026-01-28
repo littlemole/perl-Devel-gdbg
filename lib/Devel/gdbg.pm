@@ -6,6 +6,7 @@ use strict;
 use warnings;
 use File::Basename;
 use Data::Dumper;
+use JSON;
 
 our @ISA = qw();
 
@@ -47,6 +48,8 @@ use Cwd         qw(getcwd abs_path);
 use File::Slurp qw(slurp write_file);
 use File::Basename;
 use Storable qw(dclone);
+use JSON;
+use Params::Util qw<_HASH _HASH0 _HASHLIKE _ARRAYLIKE>;
 
 # shared lib for IPC between debugger and UI
 use Devel::dipc;
@@ -70,7 +73,7 @@ my %breakpoints;         # remember breakpoint markers so we can delete 'em
 my $lexicals;            # caches current lexicals (for eval)
 my %files;               # map abs path -> filename as seen by debugger
 my %postpone;            # postponed break points
-
+my $lastSelection = '';
 ##################################################
 ##################################################
 
@@ -506,6 +509,256 @@ sub getSubs {
 	return $result;
 }
 
+sub deref {
+
+	my ($source,$start,$target) = shift;
+
+	my $ref_type = ref $source;
+	if(!$ref_type) {
+		return {
+			type  => "SCALAR",
+			value => $source,
+		};
+	}
+	elsif(_ARRAYLIKE($source)) {
+		my @result;
+		foreach my $item ( $source->@* ) {
+			push @result, deref($item,$target);
+		}
+		return {
+			type  => $ref_type,
+			value => \@result,
+		};
+	}
+	elsif(_HASHLIKE($source)) {
+		my %result;
+		foreach my $item ( keys $source->%* ) {
+			$result{$item} = deref($source->{$item},$target);
+		}
+		return {
+			type  => $ref_type,
+			value => \%result,
+		};
+	}
+	elsif($ref_type eq 'CODE') {
+		return {
+			type  => "CODE",
+			value => '<>',
+		};
+
+	}
+	elsif($ref_type eq 'FORMAT') {
+		return {
+			type  => "FORMAT",
+			value => $source,
+		};
+		
+	}
+	elsif($ref_type eq 'IO') {
+		return {
+			type  => "IO",
+			value => '<>',
+		};
+		
+	}
+	elsif($ref_type eq 'SCALAR') {
+		return {
+			type  => "REF",
+			value => ${$source},
+		};
+		
+	}
+	elsif($ref_type eq 'VSTRING') {
+		return {
+			type  => "VSTRING",
+			value => $source,
+		};
+		
+	}
+	elsif($ref_type eq 'GLOB') {
+		return {
+			type  => "GLOB",
+			value => '<>',
+		};
+		
+	}
+	elsif($ref_type eq 'LVALUE') {
+		return {
+			type  => "LVALUE",
+			value => $source,
+		};
+		
+	}
+	elsif($ref_type eq 'REGEXP') {
+		return {
+			type  => "REGEXP",
+			value => $source,
+		};
+		
+	}
+	elsif($ref_type eq 'REF') {
+		return deref( ${$source});
+	}
+	return {
+		type  => $ref_type,
+		value => undef,
+	};
+}
+
+sub find_lex_src {
+
+	my ($source,$target) = @_;
+
+	if (ref $source eq 'REF') {
+		$source = ${$source};
+	}
+	
+
+print STDERR "FLS: ".Dumper($target,$source,ref $source);
+
+	if( (scalar @$target) == 0 ) {
+		return $source;
+	}
+
+	my $p = shift $target->@*;
+
+	if(_HASHLIKE($source)) {
+		my $i = $source->{$p};
+		return find_lex_src( $i, $target );
+	}
+	elsif(_ARRAYLIKE($source)) {
+		my $i = $source->[$p];
+		return find_lex_src( $i, $target );
+	}
+	else {
+		return;
+	}
+
+	return;
+}
+
+sub expand_lex {
+	my ($source,$isRoot,$level) = @_;
+
+	$level = $level // 0;
+
+	my $ref_type = ref $source;
+	if(!$ref_type) {
+		return {
+			type  => "SCALAR",
+			value => $source,
+		};
+	}
+	elsif(_ARRAYLIKE($source)) {
+		if($level == 0 || $isRoot) {
+			my @result;
+			my $c = 0;
+			foreach my $item ( $source->@* ) {
+				my $expand = 0;
+				if(index($lastSelection,"$c") == 0) {
+					$expand = 1;
+				}
+				push @result, expand_lex($item,$isRoot,$level+1);
+				$c++;
+			}
+			return {
+				type  => $ref_type,
+				value => \@result,
+			};
+		}
+		return {
+			type  => $ref_type,
+			placeholder => 1,
+		};
+	}
+	elsif(_HASHLIKE($source)) {
+		if($level == 0 || $isRoot ) {
+			my %result;
+			foreach my $item ( keys $source->%* ) {
+				my $expand = '';
+print STDERR "??? $lastSelection =?= $isRoot/$item\n";				
+				if(index("/$lastSelection","$isRoot/$item") == 0) {
+					$expand = "$isRoot/$item";
+					print STDERR "**********************\n";
+				}
+				$result{$item} = expand_lex($source->{$item},$expand,$level+1);
+			}
+			return {
+				type  => $ref_type,
+				value => \%result,
+			};
+		}
+		return {
+			type  => $ref_type,
+			placeholder => 1,
+		};
+	}
+	elsif($ref_type eq 'CODE') {
+		return {
+			type  => "CODE",
+			value => '<>',
+		};
+
+	}
+	elsif($ref_type eq 'FORMAT') {
+		return {
+			type  => "FORMAT",
+			value => $source,
+		};
+		
+	}
+	elsif($ref_type eq 'IO') {
+		return {
+			type  => "IO",
+			value => '<>',
+		};
+		
+	}
+	elsif($ref_type eq 'SCALAR') {
+		return {
+			type  => "REF",
+			value => ${$source},
+		};
+		
+	}
+	elsif($ref_type eq 'VSTRING') {
+		return {
+			type  => "VSTRING",
+			value => $source,
+		};
+		
+	}
+	elsif($ref_type eq 'GLOB') {
+		return {
+			type  => "GLOB",
+			value => '<>',
+		};
+		
+	}
+	elsif($ref_type eq 'LVALUE') {
+		return {
+			type  => "LVALUE",
+			value => $source,
+		};
+		
+	}
+	elsif($ref_type eq 'REGEXP') {
+		return {
+			type  => "REGEXP",
+			value => $source,
+		};
+		
+	}
+	elsif($ref_type eq 'REF') {
+		return expand_lex( ${$source}, $isRoot, $level);
+	}
+	return {
+		type  => $ref_type,
+		value => undef,
+	};
+
+}
+
 ##################################################
 # process messages from ui
 ##################################################
@@ -544,6 +797,46 @@ my @msg_handlers = (
 			my $msg = $currentFile . "," . $currentLine . "," . $info;
 
 			$fifo->write("lexicals $msg");
+		}
+	},
+	{
+		# show lexicals JSON
+		regex => qr/^jsonlexicals (.*)$/s,
+		handler => sub {
+
+			my $target = $1;
+			my $h = peek_my(3);
+			$lexicals = $h;
+#			my $d = deref($h,"/",$target);
+
+			$target =~ s/^\///;
+			$target =~ s/\/$//;
+print STDERR "TARGET: $target\n";
+
+			my @t = split( /\//, $target );
+
+			my $isRoot = '';
+			if( scalar @t != 0) {
+				$lastSelection = $target;
+			}
+			else {
+				$isRoot = '';
+			}
+
+print STDERR "TARGET: ".Dumper(\@t);
+
+			my $r = find_lex_src($h,\@t);
+			my $d = {};
+
+			if($r) {
+
+				$d = expand_lex($r,$isRoot);
+			}
+
+			my $json = JSON->new()->allow_blessed()->allow_unknown();
+			my $info = $json->utf8->encode($d);
+			my $msg = $currentFile . ",/" . $target . "," . $info;
+			$fifo->write("jsonlexicals $msg");
 		}
 	},
 	{
