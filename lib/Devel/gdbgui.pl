@@ -276,7 +276,6 @@ sub onReload {
 
 	my $widget = shift;
 	my $event = shift;
-print STDERR "onReload $currentFile,$currentLine\n";
 	$fifo->write("fetch $currentFile,$currentLine");
 }
 

@@ -26,14 +26,4 @@ COPY lib/Devel/dipc.pm /usr/share/perl5/Devel/
 # uid 1000 by defualt since 24.04
 USER ubuntu 
 
-#ENV DISPLAY=:1
-#ENV DISPLAY_WIDTH=1280
-#ENV DISPLAY_HEIGHT=800
-#ENV DISPLAY_DEPTH=24
-#ENV VNC_PORT=9998
-#ENV NOVNC_PORT=9999
-
-#ENV GDBG_FIFO_DIR="/opt/otobo/" 
-#ENV GDBG_KILL_CMD="/opt/sigkill"
-
 CMD "/opt/run.sh"

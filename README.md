@@ -3,7 +3,7 @@
 debug a simple perl script
 
 ```Bash
-PERL5LIB="$PERL5LIB:<Path_to_this_repo_on_yor_disk>/lib/" perl -dd:gdbg test.pl
+PERL5LIB="$PERL5LIB:<Path_to_this_repo_on_yor_disk>/lib/" perl -d:gdbg test.pl
 ```
 
 # debug otobo
@@ -42,6 +42,9 @@ function exec_web() {
        exec perl -I /opt/otobo/Kernel/cpan-lib -d:gdbg /opt/otobo_install/local/bin/plackup -s Standalone --port 5000 bin/psgi-bin/otobo.psgi
 ```
 
+
+
+
 now run `docker-compose up` to start otobo
 
 afterwards, start the debugger ui:
@@ -50,6 +53,15 @@ run the ui;
 ```Bash
 GDBG_FIFO_DIR="/opt/otobo/" GDBG_KILL_CMD='docker exec otobo-web-1 kill -s SIGINT {{PID}}' perl -I </path/to/local/copy/of/debugger/src/lib/> gdbgui.pl
 ```
+
+### why not gazelle? or shotgun ?
+
+gazelle (or starman) is pre-forking. for debugging we prefer to have a webserver that runs withing a single process since we can only debug a single process at a time.
+
+shotgun runs one a single process at a time, but a new one for each request. 
+
+`Standalone` PSGI server comes with the Plack distribution and happens
+to be a simple server that runs everything from one process, hence a good match for the **debug** requirements.
 
 # using docker
 
@@ -82,4 +94,4 @@ make down
 
 Stop the dgbg container, stop and re-start the otobo web container, then re-start the debugger container.
 
-*sorry for the inconvinience for the time being*
+*for the time being apologies for all the inconvinience*
