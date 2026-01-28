@@ -6,10 +6,10 @@
 *.o
 *.pm.tdy
 *.bs
-
+.pgdbbrkpts
 # Devel::Cover
 cover_db/
-
+*~
 # Devel::NYTProf
 nytprof.out
 

@@ -145,7 +145,7 @@ sub onStop {
 	}
 	else {
 		my $cmd = $ENV{"GDBG_KILL_CMD"};
-		$cmd =~ s/\{\{PI\}\}/$pid/;
+		$cmd =~ s/\{\{PID\}\}/$pid/;
 		print STDERR "KILL: $cmd\n";
 		system("bash -c '$cmd'");
 	}
@@ -272,6 +272,14 @@ sub onInfoPaneClick {
 	}
 }
 
+sub onReload {
+
+	my $widget = shift;
+	my $event = shift;
+print STDERR "onReload $currentFile,$currentLine\n";
+	$fifo->write("fetch $currentFile,$currentLine");
+}
+
 # mouse click on a line, if on breakpoints, files or subroutines view
 sub onClick {
 
@@ -341,12 +349,9 @@ sub onRowExpanded {
 
 			$gval = $model->get_value($iter,2); 
 			$model->remove($first);
-			print STDERR "EXPAND $gval\n";
 			$fifo->write("jsonlexicals $gval");
 		}
 	}
-
-print STDERR "SELECTEDVAL $selectedVar\n";	
 }
 
 
@@ -423,8 +428,6 @@ sub onSearch {
 
 	$searchSettings->set_search_text($query);
 
-print STDERR "SENSI: ".$searchSettings->get_case_sensitive()."\n";
-
 	$searchCtx = Gtk::Source::SearchContext->new(
 		$widgets{sourceView}->get_buffer(),
 		$searchSettings,
@@ -438,8 +441,6 @@ print STDERR "SENSI: ".$searchSettings->get_case_sensitive()."\n";
 	my $direction = $isShift 
 		? $searchDirection == 'forward' ? 'backward' : 'forward'   
 		: $searchDirection;
-
-print STDERR "SHIFT: $isShift $direction\n";		
 
 	$searchDirection = $direction;
 
@@ -489,7 +490,6 @@ sub onCancelSearch {
 			my $dialog = $widgets{searchDialog};
 
 			my $active = $searchDirection eq 'forward' ? 1 : 0;
-			print STDERR "A: $active\n";
 			$widgets{searchForward}->set_active($active);
 			$widgets{searchBackward}->set_active(!$active);
 
@@ -540,7 +540,6 @@ sub onSearchSensitive {
 	my $event = shift;
 
 	my $value = $widget->get_active;
-print STDERR "SetSensi $value\n";	
 	$searchSettings->set_case_sensitive($value);
 }
 
@@ -572,29 +571,19 @@ sub find_root {
 		};
 	}
 
-#	$target =~ s/^\///;
-#	my @t = split( /\//, $target);
-print STDERR "---------$target------------\n";
 	my $model = $widgets{lexicalTreeView}->get_model;
-#	my $p = shift @t;
 
-print STDERR "ROOT: $root\n";
 	my $iter = $model->iter_children($root);
 	while( $iter) {
-print STDERR "ITER: ".Dumper($iter);
 
 		my $gv;
 		eval {
 			$gv = $model->get_value($iter,0);
-print STDERR "# ITEM:".Dumper($gv);			
 			$gv = $model->get_value($iter,2);
-print STDERR "       ".Dumper($gv);			
 		};
 		if($@) {
 
-print STDERR $@."\n";
-print STDERR "NOT FOUND e\n";
-
+			print STDERR $@."\n";
 			return {
 				found => 0,
 				result => undef,
@@ -605,8 +594,6 @@ print STDERR "NOT FOUND e\n";
 
 		my $i = index $target, $gv;
 
-print STDERR "$gv =?= $target, $i\n";
-
 		if($i == 0) {
 
 			if($target eq $gv) {
@@ -616,14 +603,11 @@ print STDERR "$gv =?= $target, $i\n";
 				};
 			}
 			else {
-print STDERR "RECURSE\n";				
 				return find_root($target,$iter);
 			}
 		}
 		$model->iter_next($iter);
-		#$iter = $iter2;
 	}
-print STDERR "NOT FOUND\n";
 	return {
 		found => 0,
 		result => undef,
@@ -704,7 +688,6 @@ my @msg_handlers = (
 			$currentFile = $file;
 
 			$infoBuffer->set_text( $info, -1 );		
-print STDERR "jsonlexicals $selectedVar\n";			
 			$fifo->write("jsonlexicals /");
 		}
 	},
@@ -735,16 +718,11 @@ print STDERR "jsonlexicals $selectedVar\n";
 			if($target eq '/') {
 				$model->clear;
 			}
-print STDERR "+++++++++++++++++\n";
-print STDERR "$target ".Dumper($info);			
 
 			my $root = undef;#$model->get_iter_first();
-print STDERR "root:".Dumper($root);			
 			my $result = find_root($target,$root);
 			if($result->{found}) {
-print STDERR "FOUND!\n";
 				my $iter = $result->{result};
-print STDERR "FOUND $iter!\n";
 				my $path = '';
 				if($iter) {
 					$path = $model->get_value($iter,2);
@@ -858,7 +836,7 @@ sub process_msg {
 
     my $msg = shift;
 
-	print "MSG: ".substr($msg,0,60)."\n";
+	#print "MSG: ".substr($msg,0,60)."\n";
 
 	foreach my $handler ( @msg_handlers) {
 		if ( $msg =~ $handler->{regex} ) {
@@ -1046,6 +1024,7 @@ sub enableButtons {
     $widgets{openFileMenu}->set_sensitive($state);
     $widgets{showSubsMenu}->set_sensitive($state);
     $widgets{showFilesMenu}->set_sensitive($state);
+    $widgets{lexicalTreeView}->set_sensitive($state);
 
     $widgets{buttonStop}->set_sensitive( $state ? 0 : 1 );
 }
@@ -1123,12 +1102,10 @@ sub populate_item {
 			populate_lexicals($item,$model,$iter,$path);
 		}				
 
-print STDERR "xxx $path =?= $selectedVar\n";
 		if( index( $selectedVar, $path) == 0 ) {
 			if($iter) {
 				my $p = $model->get_path($iter);
 				if($p) {
-					print STDERR "---------> expand\n";
 					$widgets{lexicalTreeView}->expand_to_path($p);
 				}
 			}
@@ -1148,38 +1125,21 @@ sub populate_lexicals {
 	my $value = $data->{value};
 	my $placeholder = $data->{placeholder};
 
-	# if($placeholder) {
-
-	# 	my $iter = $model->append($root);
-	# 	my $gv = Glib::Object::Introspection::GValueWrapper->new ("Glib::String", '');
-	# 	$model->set_value($iter,0,$gv);
-	# 	$model->set_value($iter,1,$gv);
-	# 	$model->set_value($iter,2,$gv);
-	# 	return;
-	# }
-print STDERR "yyy $path =?= $selectedVar\n";
-
-
 	if($type ne 'ARRAY' && $value ne '<unk>' && $value) {
 
+		if(!_HASHLIKE($value)) {
+			$value = {};
+		}
+		foreach my $key ( sort keys $value->%* ) {
 
-			if(!_HASHLIKE($value)) {
-				$value = {};
-			}
-			foreach my $key ( sort keys $value->%* ) {
+			my $item = $value->{$key};
 
-				my $item = $value->{$key};
+			my $iter = $model->append($root);
 
-				my $iter = $model->append($root);
-
-				populate_item($model,$iter,$key,$item,"$path/$key");			
-			}
+			populate_item($model,$iter,$key,$item,"$path/$key");			
+		}
 	}
 	else {
-
-#		if(!_ARRAYLIKE($value)) {
-#			$value = [];
-#		}
 
 		my $i = 0;
 		foreach my $item ( $value->@* ) {
@@ -1187,40 +1147,6 @@ print STDERR "yyy $path =?= $selectedVar\n";
 			my $iter = $model->append($root);
 			populate_item($model,$iter,"",$item,"$path/$i");			
 			$i++;
-
-
-			# my $iter = $model->append($root);
-
-			# my $gv = Glib::Object::Introspection::GValueWrapper->new ("Glib::String", "");
-			# $model->set_value($iter,0,$gv);
-
-			# $gv = Glib::Object::Introspection::GValueWrapper->new ("Glib::String", $path);
-			# $model->set_value($iter,2,$gv);
-
-			# if( $item->{type} eq 'REF' || $item->{type} eq 'SCALAR') {
-			# 	my $gv = Glib::Object::Introspection::GValueWrapper->new ("Glib::String", $item->{value});
-			# 	$model->set_value($iter,1,$gv);
-			# }
-			# elsif( $item->{type} eq 'CODE' || $item->{type} eq 'IO' || $item->{type} eq 'GLOB'  ) {
-			# 	my $gv = Glib::Object::Introspection::GValueWrapper->new ("Glib::String", $item->{type});
-			# 	$model->set_value($iter,1,$gv);
-			# }
-			# else {
-			# 	my $gv = Glib::Object::Introspection::GValueWrapper->new ("Glib::String", $item->{type});
-			# 	$model->set_value($iter,1,$gv);
-			# 	if( defined $item->{value} ) {
-			# 		populate_lexicals($item,$model,$iter,$path);
-			# 	}
-
-			# 	if( $path eq $selectedVar) {
-			# 		if($iter) {
-			# 			my $p = $model->get_path($iter);
-			# 			if($p) {
-			# 				$widgets{lexicalTreeView}->expand_to_path($p);
-			# 			}
-			# 		}
-			# 	}
-			# }
 		}
 	}
 
@@ -1229,8 +1155,6 @@ print STDERR "yyy $path =?= $selectedVar\n";
 		if($iter) {
 			my $p = $model->get_path($iter);
 			if($p) {
-				my $px = $p->to_string;
-					print STDERR "---------> expand $px\n";
 				$widgets{lexicalTreeView}->expand_to_path($p);
 			}
 		}
@@ -1276,8 +1200,6 @@ sub connect_signals {
 }
 
 sub build_ui {
-
-print STDERR "build ui\n";
 
 	# load widgets from xml
     my $builder = Gtk3::Builder->new();
@@ -1332,25 +1254,34 @@ print STDERR "build ui\n";
 
 	my $renderer1 = Gtk3::CellRendererText->new ();
 	my $renderer2 = Gtk3::CellRendererText->new ();
-	my $renderer3 = Gtk3::CellRendererText->new ();
+	#my $renderer3 = Gtk3::CellRendererText->new ();
 
 	my $column1 = Gtk3::TreeViewColumn->new();
+	$column1->set_resizable(1);
+	$column1->set_sizing('fixed');
+	$column1->set_fixed_width(100);
 	$column1->set_title("Var");
   	$column1->pack_start($renderer1, 0);	
 	$column1->add_attribute($renderer1,"text",0);
 	$widgets{lexicalTreeView}->append_column( $column1);
 
 	my $column2 = Gtk3::TreeViewColumn->new();
+	$column2->set_resizable(1);
+	$column2->set_sizing('fixed');
+	$column2->set_fixed_width(100);
 	$column2->set_title("Info");
   	$column2->pack_start($renderer2, 0);	
 	$column2->add_attribute($renderer2,"text",1);
 	$widgets{lexicalTreeView}->append_column( $column2 );
 
-	my $column3 = Gtk3::TreeViewColumn->new();
-	$column3->set_title("Path");
-  	$column3->pack_start($renderer3, 0);	
-	$column3->add_attribute($renderer3,"text",2);
-	$widgets{lexicalTreeView}->append_column( $column3 );
+	# my $column3 = Gtk3::TreeViewColumn->new();
+	# $column3->set_resizable(1);
+	# $column3->set_sizing('fixed');
+	# $column3->set_fixed_width(100);
+	# $column3->set_title("Path");
+  	# $column3->pack_start($renderer3, 0);	
+	# $column3->add_attribute($renderer3,"text",2);
+	# $widgets{lexicalTreeView}->append_column( $column3 );
 
 	$widgets{lexicalTreeView}->signal_connect( 'row-expanded' => \&onRowExpanded );
 
@@ -1381,9 +1312,6 @@ print STDERR "build ui\n";
 
     # show the UI
     $widgets{mainWindow}->show_all();
-
-print STDERR "init ui done\n";
-
 }
 
 ##################################################
@@ -1391,8 +1319,6 @@ print STDERR "init ui done\n";
 ##################################################
 
 sub initialize {
-
-print STDERR "init\n";
 
     Gtk3::init();
 

@@ -1,0 +1,33 @@
+version: '3.3'
+
+services:
+
+  # keycloak
+  gdbg:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      
+    networks: 
+    - otobo_default
+    
+    ports:
+    - "9998:9998"
+    - "9999:9999"
+    volumes:
+      - ${OPT_OTOBO}:/opt/otobo
+      - /var/run/docker.sock:/tmp/docker.sock
+    environment:
+      DISPLAY: ${DISPLAY}
+      DISPLAY_WIDTH: ${DISPLAY_WIDTH}
+      DISPLAY_HEIGHT: ${DISPLAY_HEIGHT}
+      DISPLAY_DEPTH: ${DISPLAY_DEPTH}
+      VNC_PORT: ${VNC_PORT}
+      NOVNC_PORT: ${NOVNC_PORT}
+      GDBG_FIFO_DIR: ${GDBG_FIFO_DIR} 
+      GDBG_KILL_CMD: ${GDBG_KILL_CMD}
+
+networks:
+  otobo_default:
+    external: true
+

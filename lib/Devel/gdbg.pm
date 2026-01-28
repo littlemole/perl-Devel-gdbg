@@ -613,9 +613,6 @@ sub find_lex_src {
 		$source = ${$source};
 	}
 	
-
-print STDERR "FLS: ".Dumper($target,$source,ref $source);
-
 	if( (scalar @$target) == 0 ) {
 		return $source;
 	}
@@ -676,10 +673,8 @@ sub expand_lex {
 			my %result;
 			foreach my $item ( keys $source->%* ) {
 				my $expand = '';
-print STDERR "??? $lastSelection =?= $isRoot/$item\n";				
 				if(index("/$lastSelection","$isRoot/$item") == 0) {
 					$expand = "$isRoot/$item";
-					print STDERR "**********************\n";
 				}
 				$result{$item} = expand_lex($source->{$item},$expand,$level+1);
 			}
@@ -806,12 +801,9 @@ my @msg_handlers = (
 
 			my $target = $1;
 			my $h = peek_my(3);
-			$lexicals = $h;
-#			my $d = deref($h,"/",$target);
 
 			$target =~ s/^\///;
 			$target =~ s/\/$//;
-print STDERR "TARGET: $target\n";
 
 			my @t = split( /\//, $target );
 
@@ -822,8 +814,6 @@ print STDERR "TARGET: $target\n";
 			else {
 				$isRoot = '';
 			}
-
-print STDERR "TARGET: ".Dumper(\@t);
 
 			my $r = find_lex_src($h,\@t);
 			my $d = {};
