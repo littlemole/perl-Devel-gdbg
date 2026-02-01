@@ -6,6 +6,7 @@ RUN DEBIAN_FRONTEND=noninteractive apt update
 RUN DEBIAN_FRONTEND=noninteractive apt install -y xvfb x11vnc novnc websockify xfce4 dbus-x11 xterm libgtk3-perl gobject-introspection gir1.2-gtk-3.0 libgtk-3-dev curl libfile-slurp-perl 
 RUN DEBIAN_FRONTEND=noninteractive apt install -y libgtksourceview-4-dev netcat-openbsd libjson-perl libparams-util-perl	 
 
+COPY xsettings.xml /opt
 COPY run.sh /opt
 RUN chmod a+rx /opt/*.sh
 

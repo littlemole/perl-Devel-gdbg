@@ -172,7 +172,7 @@ sub open_out {
 
     $self->_makemyfifo($out);
 
-    open my $fh, ">:raw", $out || die "can't open " . $out . ": $!";
+    open my $fh, ">>:raw", $out || die "can't open " . $out . ": $!";
 
     $self->{fout} = $fh;
 }
@@ -185,7 +185,7 @@ sub open_in {
     $self->_makemyfifo($in);
 
     my $fh;
-    sysopen( $fh, $in, O_RDONLY | O_NONBLOCK )
+    sysopen( $fh, $in, O_RDWR | O_NONBLOCK )
       || die "open " . $in . " failed: $!";
 
     $self->{fin} = $fh;
@@ -199,6 +199,7 @@ sub open_in {
 sub _makemyfifo {
     my $self = shift;
     my $path = shift;
+	if( -e $path ) { return }
     eval { mkfifo( $path, 0777 ) || die "mkfifo $path already exists: $!"; };
 }
 

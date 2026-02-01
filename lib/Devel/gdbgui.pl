@@ -146,7 +146,7 @@ sub onStop {
 	else {
 		my $cmd = $ENV{"GDBG_KILL_CMD"};
 		$cmd =~ s/\{\{PID\}\}/$pid/;
-		print STDERR "KILL: $cmd\n";
+print "$cmd\n";		
 		system("bash -c '$cmd'");
 	}
 }
@@ -221,13 +221,12 @@ sub onMarker {
 	{
 		return;
 	}
-
 	# set breakpoints and notify debugger process
     my $bpn = $filename . ":" . $line;
     if ( $breakpoints{$bpn} ) {    # breakpoint already exists, remove it
         $sourceBuffers{$filename}->delete_mark( $breakpoints{$bpn} );
         delete $breakpoints{$bpn};
-        $fifo->write("delbreakpoint $filename.",".$line");
+        $fifo->write("delbreakpoint $filename,$line");
     }
     else {
         $fifo->write("breakpoint $filename,$line");
@@ -390,7 +389,9 @@ sub onWindow {
 # user closes main window
 sub onDestroy {
 
-    kill 'INT', $pid;
+	if(!$ENV{"GDBG_KILL_CMD"}) {
+    	kill 'INT', $pid;
+	}
     $quit = 1;
 }
 
@@ -560,58 +561,6 @@ sub onSearchRegexEnabled {
 	$searchSettings->set_regex_enabled ($value);
 }
 
-sub find_root {
-	my ($target,$root) = @_;
-
-	if($target eq '' || $target eq '/') {
-		return {
-			result => $root,
-			found => 1,
-		};
-	}
-
-	my $model = $widgets{lexicalTreeView}->get_model;
-
-	my $iter = $model->iter_children($root);
-	while( $iter) {
-
-		my $gv;
-		eval {
-			$gv = $model->get_value($iter,0);
-			$gv = $model->get_value($iter,2);
-		};
-		if($@) {
-
-			print STDERR $@."\n";
-			return {
-				found => 0,
-				result => undef,
-			};
-		}
-
-		$gv .= '';
-
-		my $i = index $target, $gv;
-
-		if($i == 0) {
-
-			if($target eq $gv) {
-				return {
-					result => $iter,
-					found => 1,
-				};
-			}
-			else {
-				return find_root($target,$iter);
-			}
-		}
-		$model->iter_next($iter);
-	}
-	return {
-		found => 0,
-		result => undef,
-	};
-}
 
 ##################################################
 # process messages from debugger
@@ -629,7 +578,7 @@ my @msg_handlers = (
 		# set current work directory
 		regex   => qr/^cwd (,*)/s,
 		handler => sub {
-
+print STDERR "CWD; $1\n";
 			$widgets{statusBar}->set_text($1);
 			chdir $1;
 		}
@@ -640,6 +589,7 @@ my @msg_handlers = (
 		handler => sub {
 
 			$pid = $1;
+print STDERR "PID; $1\n";
 
 			foreach my $bp ( keys %breakpoints) {
 				$fifo->write("breaktpoint $bp")
@@ -1063,6 +1013,63 @@ sub scroll {
     }
 }
 
+################################
+# variable inspector support
+################################
+
+sub find_root {
+	my ($target,$root) = @_;
+
+	if($target eq '' || $target eq '/') {
+		return {
+			result => $root,
+			found => 1,
+		};
+	}
+
+	my $model = $widgets{lexicalTreeView}->get_model;
+
+	my $iter = $model->iter_children($root);
+	while( $iter) {
+
+		my $gv;
+		eval {
+			$gv = $model->get_value($iter,0);
+			$gv = $model->get_value($iter,2);
+		};
+		if($@) {
+
+			print STDERR $@."\n";
+			return {
+				found => 0,
+				result => undef,
+			};
+		}
+
+		$gv .= '';
+
+		my $i = index $target, $gv;
+
+		if($i == 0) {
+
+			if($target eq $gv) {
+				return {
+					result => $iter,
+					found => 1,
+				};
+			}
+			else {
+				return find_root($target,$iter);
+			}
+		}
+		$model->iter_next($iter);
+	}
+	return {
+		found => 0,
+		result => undef,
+	};
+}
+
 sub populate_item {
 
 	my ($model,$iter,$key,$item,$path) = @_;
@@ -1307,7 +1314,7 @@ sub build_ui {
 	
 	# set everything to disabled on startup
     enableButtons(0);
-    $widgets{buttonStop}->set_sensitive(0);
+    $widgets{buttonStop}->set_sensitive(1);
 
     # show the UI
     $widgets{mainWindow}->show_all();
@@ -1334,6 +1341,12 @@ sub initialize {
     # this will hang until the Debugger has connected
     $fifo->open_in("$fifo_dir/perl_debugger_fifo_out");
     $fifo->open_out("$fifo_dir/perl_debugger_fifo_in");
+
+#	$fifo->write("init");
+
+	if ( $ENV{"GDBG_NO_FORK"} ) {
+		onStop();		
+	}
 }
 
 ##################################################
@@ -1361,7 +1374,10 @@ while ( !$quit ) {
 # over and out
 ##################################################
 
-if ( $quit == 1 ) {
-    $fifo->write("quit");
+if ( $quit == 1 ) 
+{
+	if(!$ENV{"GDBG_NO_FORK"}) {
+	    $fifo->write("quit");
+	}
 }
 

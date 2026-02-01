@@ -79,6 +79,7 @@ my $lastSelection = '';
 
 # INT signal handler
 sub dbint_handler {
+	print STDERR "SIGINT\n";
     $DB::single = 1;
 }
 
@@ -95,14 +96,19 @@ my $fifo = Devel::dipc->new();
 $fifo->open_out("$fifo_dir/perl_debugger_fifo_out");
 
 # send current working dir to UI
-$fifo->write( "cwd " . getcwd() );
+#$fifo->write( "cwd " . getcwd() );
 
 # send PID of current process to UI
-$fifo->write( "pid " . $$ );
+#$fifo->write( "pid " . $$ );
 
 $fifo->open_in("$fifo_dir/perl_debugger_fifo_in");
 
 restoreBreakpoints();
+
+$fifo->write( "cwd " . getcwd() );
+
+# send PID of current process to UI
+$fifo->write( "pid " . $$ );
 
 # start non tracing
 $DB::trace = 0;
@@ -509,6 +515,10 @@ sub getSubs {
 	return $result;
 }
 
+##################################################
+# var inspector support
+##################################################
+
 sub deref {
 
 	my ($source,$start,$target) = shift;
@@ -760,6 +770,18 @@ sub expand_lex {
 
 my @msg_handlers = (
 	{
+		regex => qr/^init$/s,
+		handler => sub {
+
+			# send current working dir to UI
+			$fifo->write( "cwd " . getcwd() );
+
+			# send PID of current process to UI
+			$fifo->write( "pid " . $$ );
+
+		}
+	},
+	{
 		# quit debugger
 		regex => qr/^quit$/s,
 		handler => sub {
@@ -881,7 +903,7 @@ my @msg_handlers = (
 		}
 	},
 	{
-		# ste breakpoint at file:line
+		# set breakpoint at file:line
 		regex => qr/^breakpoint ([^,]+),([0-9]+)$/s,
 		handler => sub {
 
@@ -961,7 +983,7 @@ sub process_msg {
 
     my $msg = shift;
 
-#   print "MSG: $msg\n";
+    # print STDERR "MSG: $msg\n";
 
 	foreach my $handler ( @msg_handlers) {
 		if ( $msg =~ $handler->{regex} ) {
@@ -972,7 +994,7 @@ sub process_msg {
 }
 
 ##################################################
-# THE actual debugger
+# the actual debugger
 ##################################################
 
 # called from Perl for every breakable line

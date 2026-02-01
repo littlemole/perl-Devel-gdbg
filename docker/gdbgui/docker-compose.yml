@@ -24,6 +24,7 @@ services:
       DISPLAY_DEPTH: ${DISPLAY_DEPTH}
       VNC_PORT: ${VNC_PORT}
       NOVNC_PORT: ${NOVNC_PORT}
+      GDBG_NO_FORK: True
       GDBG_FIFO_DIR: ${GDBG_FIFO_DIR} 
       GDBG_KILL_CMD: ${GDBG_KILL_CMD}
 
