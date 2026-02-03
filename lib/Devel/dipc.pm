@@ -185,6 +185,11 @@ sub open_in {
     $self->_makemyfifo($in);
 
     my $fh;
+
+	# note: O_RDWR and not O_RDONLY,
+	# although there will be no writing ever
+	# this is to keep the fifo alive
+	# by having at least on 'writer'
     sysopen( $fh, $in, O_RDWR | O_NONBLOCK )
       || die "open " . $in . " failed: $!";
 
@@ -199,8 +204,10 @@ sub open_in {
 sub _makemyfifo {
     my $self = shift;
     my $path = shift;
+
 	if( -e $path ) { return }
-    eval { mkfifo( $path, 0777 ) || die "mkfifo $path already exists: $!"; };
+
+    mkfifo( $path, 0777 ) || die "mkfifo $path already exists: $!"; 
 }
 
 1;
