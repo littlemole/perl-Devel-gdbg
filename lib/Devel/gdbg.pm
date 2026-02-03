@@ -94,20 +94,11 @@ my $fifo_dir = $ENV{"GDBG_FIFO_DIR"} || '/tmp/';
 my $fifo = Devel::dipc->new();
 
 $fifo->open_out("$fifo_dir/perl_debugger_fifo_out");
-
-# send current working dir to UI
-#$fifo->write( "cwd " . getcwd() );
-
-# send PID of current process to UI
-#$fifo->write( "pid " . $$ );
-
 $fifo->open_in("$fifo_dir/perl_debugger_fifo_in");
 
 restoreBreakpoints();
 
 $fifo->write( "cwd " . getcwd() );
-
-# send PID of current process to UI
 $fifo->write( "pid " . $$ );
 
 # start non tracing
@@ -268,9 +259,6 @@ sub setBreakpoint {
     my $bpn = $abspath . ":" . $line;
     if ( !$breakpoints{$bpn} ) { 
 
-print "set reakpoint: $abspath:$line\n";
-
-
         # check if file is already loaded by perl
         if ( hasdblines($filename) ) {
 
@@ -346,9 +334,6 @@ sub deleteBreakpoint {
 		$postpone{$abspath} = \@ps;
 	}
 	getBreakpointsForFile($abspath);
-
-#	$fifo->write("delmarker $abspath,$line");	
-	
 }
 
 # helper to set a postponed breakpoint
@@ -365,25 +350,31 @@ sub setPotponedBreakpoints {
 		}
 	}
 
+	my $update = 0;
+
 	foreach my $p (@$pp) {
 
 		# find breakpoint and update the UI
 		my $l = setBreakpointOnNextBreakableLine($file,$p);
 		if($l != -1 ) {
 
-			$fifo->write("marker $file,$l");
+			$update = 1;
 		}
 	}
 	delete $postpone{$file};
+	
+	if($update) {
+
+		getBreakpointsForFile($file);	
+	}
 }
+
+# helper to send current breakpoints
+# for a file to UI client
 
 sub getBreakpointsForFile {
 	my $file = shift;
 	
-print "getBreakpointsForFile($file)\n";
-use Data::Dumper;
-print Dumper(\%breakpoints);
-
 	my @lines;
 	foreach my $key ( %breakpoints ) {
 		if( $key =~ /^$file:(.*)$/ ) {
@@ -842,6 +833,57 @@ my @msg_handlers = (
 		}
 	},
 	{
+		# continue to next breakpoint
+		regex => qr/^continue$/s,
+		handler => sub {
+
+			$breakout   = 1;
+			$DB::single = 0;
+			$DB::trace  = 0;
+		}
+	},
+	{
+		# single step (over)
+		regex => qr/^next$/s,
+		handler => sub {
+
+			$breakout   = 1;
+			$DB::single = 0;
+			$DB::trace  = 1;
+			$stepover   = $depth + 1;
+		}
+	},
+	{
+		# (single) step out of function
+		regex => qr/^return$/s,
+		handler => sub {
+
+		    $DB::trace = 1;
+			if ( 0 ) { # $depth > 0 ) {
+				$breakout   = 1;
+				$stepout    = 1;
+				$DB::single = 0;
+			}
+			else {
+				$breakout   = 1;
+				$DB::single = 0;
+				$stepover   = $depth;
+			}
+		}
+	},
+	{
+		# eval in current context
+		regex => qr/^eval (.*)$/ms,
+		handler => sub {
+
+			my $r = eval($1);
+			if ($@) {
+				$r = $@;
+			}
+			$fifo->write("eval $r");
+		}
+	},
+	{
 		# show lexicals
 		regex => qr/^lexicals$/s,
 		handler => sub {
@@ -891,57 +933,7 @@ my @msg_handlers = (
 			$fifo->write("jsonlexicals $msg");
 		}
 	},
-	{
-		# continue to next breakpoint
-		regex => qr/^continue$/s,
-		handler => sub {
 
-			$breakout   = 1;
-			$DB::single = 0;
-			$DB::trace  = 0;
-		}
-	},
-	{
-		# single step (over)
-		regex => qr/^next$/s,
-		handler => sub {
-
-			$breakout   = 1;
-			$DB::single = 0;
-			$DB::trace  = 1;
-			$stepover   = $depth + 1;
-		}
-	},
-	{
-		# (single) step out of function
-		regex => qr/^return$/s,
-		handler => sub {
-
-		        $DB::trace = 1;
-			if ( 0 ) { # $depth > 0 ) {
-				$breakout   = 1;
-				$stepout    = 1;
-				$DB::single = 0;
-			}
-			else {
-				$breakout   = 1;
-				$DB::single = 0;
-				$stepover   = $depth;
-			}
-		}
-	},
-	{
-		# eval in current context
-		regex => qr/^eval (.*)$/ms,
-		handler => sub {
-
-			my $r = eval($1);
-			if ($@) {
-				$r = $@;
-			}
-			$fifo->write("eval $r");
-		}
-	},
 	{
 		# set breakpoint at file:line
 		regex => qr/^breakpoint ([^,]+),([0-9]+)$/s,
@@ -952,16 +944,6 @@ my @msg_handlers = (
 			setBreakpoint( $file, $line );
 		}
 	},
-	# {
-	# 	# delete breakpoint at file:line
-	# 	regex => qr/^delbreakpoint ([^,]+),([0-9]+)$/s,
-	# 	handler => sub {
-
-	# 		my $file = $1;
-	# 		my $line = $2;
-	# 		deleteBreakpoint( $file, $line );
-	# 	}
-	# },
 	{
 		# lookup source position of fq function
 		regex => qr/^functionbreak (.*)/s,
