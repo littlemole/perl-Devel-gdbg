@@ -214,146 +214,163 @@
         <property name="can-focus">False</property>
         <property name="orientation">vertical</property>
         <child>
-          <object class="GtkMenuBar" id="mainMenuBar">
-            <property name="visible">True</property>
-            <property name="can-focus">False</property>
-            <child>
-              <object class="GtkMenuItem">
-                <property name="visible">True</property>
-                <property name="can-focus">False</property>
-                <property name="label" translatable="yes">_File</property>
-                <property name="use-underline">True</property>
-                <child type="submenu">
-                  <object class="GtkMenu">
-                    <property name="visible">True</property>
-                    <property name="can-focus">False</property>
-                    <child>
-                      <object class="GtkImageMenuItem" id="openFileMenu">
-                        <property name="label">Open Source File</property>
-                        <property name="visible">True</property>
-                        <property name="can-focus">False</property>
-                        <property name="image">image1</property>
-                        <property name="use-stock">False</property>
-                        <property name="always-show-image">True</property>
-                        <signal name="activate" handler="onOpen" swapped="no"/>
-                      </object>
-                    </child>
-                    <child>
-                      <object class="GtkMenuItem" id="reloadMenu">
-                        <property name="visible">True</property>
-                        <property name="can-focus">False</property>
-                        <property name="label" translatable="yes">Reload File</property>
-                        <property name="use-underline">True</property>
-                        <signal name="activate" handler="onReload" swapped="no"/>
-                      </object>
-                    </child>
-                    <child>
-                      <object class="GtkMenuItem" id="saveBreakpointsMenu">
-                        <property name="visible">True</property>
-                        <property name="can-focus">False</property>
-                        <property name="label" translatable="yes">Save Breakpoints</property>
-                        <property name="use-underline">True</property>
-                        <signal name="activate" handler="onStoreBreakpoints" swapped="no"/>
-                      </object>
-                    </child>
-                    <child>
-                      <object class="GtkMenuItem" id="scrollMenu">
-                        <property name="visible">True</property>
-                        <property name="can-focus">False</property>
-                        <property name="label" translatable="yes">Goto Current Line</property>
-                        <property name="use-underline">True</property>
-                        <signal name="activate" handler="onScroll" swapped="no"/>
-                      </object>
-                    </child>
-                  </object>
-                </child>
-              </object>
-            </child>
-            <child>
-              <object class="GtkMenuItem">
-                <property name="visible">True</property>
-                <property name="can-focus">False</property>
-                <property name="label" translatable="yes">_Show</property>
-                <property name="use-underline">True</property>
-                <child type="submenu">
-                  <object class="GtkMenu">
-                    <property name="visible">True</property>
-                    <property name="can-focus">False</property>
-                    <child>
-                      <object class="GtkMenuItem" id="lexicalsMenu">
-                        <property name="visible">True</property>
-                        <property name="can-focus">False</property>
-                        <property name="label" translatable="yes">Show Lexicals</property>
-                        <property name="use-underline">True</property>
-                        <signal name="activate" handler="onLexicals" swapped="no"/>
-                      </object>
-                    </child>
-                    <child>
-                      <object class="GtkMenuItem" id="breakpointsMenu">
-                        <property name="visible">True</property>
-                        <property name="can-focus">False</property>
-                        <property name="label" translatable="yes">Show Breakpoints</property>
-                        <property name="use-underline">True</property>
-                        <signal name="activate" handler="onBreakpoints" swapped="no"/>
-                      </object>
-                    </child>
-                    <child>
-                      <object class="GtkMenuItem" id="showSubsMenu">
-                        <property name="visible">True</property>
-                        <property name="can-focus">False</property>
-                        <property name="label" translatable="yes">Show Subroutines</property>
-                        <property name="use-underline">True</property>
-                        <signal name="activate" handler="onSubs" swapped="no"/>
-                      </object>
-                    </child>
-                    <child>
-                      <object class="GtkMenuItem" id="showFilesMenu">
-                        <property name="visible">True</property>
-                        <property name="can-focus">False</property>
-                        <property name="label" translatable="yes">Show Files</property>
-                        <property name="use-underline">True</property>
-                        <signal name="activate" handler="onFiles" swapped="no"/>
-                      </object>
-                    </child>
-                  </object>
-                </child>
-              </object>
-            </child>
-            <child>
-              <object class="GtkMenuItem">
-                <property name="visible">True</property>
-                <property name="can-focus">False</property>
-                <property name="label" translatable="yes">_Themes</property>
-                <property name="use-underline">True</property>
-                <child type="submenu">
-                  <object class="GtkMenu" id="themesMenu">
-                    <property name="visible">True</property>
-                    <property name="can-focus">False</property>
-                  </object>
-                </child>
-              </object>
-            </child>
-            <child>
-              <object class="GtkMenuItem">
-                <property name="visible">True</property>
-                <property name="can-focus">False</property>
-                <property name="label" translatable="yes">_Sources</property>
-                <property name="use-underline">True</property>
-                <child type="submenu">
-                  <object class="GtkMenu" id="windowMenu">
-                    <property name="visible">True</property>
-                    <property name="can-focus">False</property>
-                  </object>
-                </child>
-              </object>
-            </child>
-          </object>
-          <packing>
-            <property name="expand">False</property>
-            <property name="fill">True</property>
-            <property name="position">0</property>
-          </packing>
-        </child>
+		  <object class="GtkBox">
+			<property name="visible">True</property>
+			<property name="can-focus">False</property>
+			<property name="orientation">horizontal</property>
+			<child>
+				<object class="GtkMenuBar" id="mainMenuBar">
+					<property name="visible">True</property>
+					<property name="can-focus">False</property>
+					<child>
+					<object class="GtkMenuItem">
+						<property name="visible">True</property>
+						<property name="can-focus">False</property>
+						<property name="label" translatable="yes">_File</property>
+						<property name="use-underline">True</property>
+						<child type="submenu">
+						<object class="GtkMenu">
+							<property name="visible">True</property>
+							<property name="can-focus">False</property>
+							<child>
+							<object class="GtkImageMenuItem" id="openFileMenu">
+								<property name="label">Open Source File</property>
+								<property name="visible">True</property>
+								<property name="can-focus">False</property>
+								<property name="image">image1</property>
+								<property name="use-stock">False</property>
+								<property name="always-show-image">True</property>
+								<signal name="activate" handler="onOpen" swapped="no"/>
+							</object>
+							</child>
+							<child>
+							<object class="GtkMenuItem" id="reloadMenu">
+								<property name="visible">True</property>
+								<property name="can-focus">False</property>
+								<property name="label" translatable="yes">Reload File</property>
+								<property name="use-underline">True</property>
+								<signal name="activate" handler="onReload" swapped="no"/>
+							</object>
+							</child>
+							<child>
+							<object class="GtkMenuItem" id="saveBreakpointsMenu">
+								<property name="visible">True</property>
+								<property name="can-focus">False</property>
+								<property name="label" translatable="yes">Save Breakpoints</property>
+								<property name="use-underline">True</property>
+								<signal name="activate" handler="onStoreBreakpoints" swapped="no"/>
+							</object>
+							</child>
+							<child>
+							<object class="GtkMenuItem" id="scrollMenu">
+								<property name="visible">True</property>
+								<property name="can-focus">False</property>
+								<property name="label" translatable="yes">Goto Current Line</property>
+								<property name="use-underline">True</property>
+								<signal name="activate" handler="onScroll" swapped="no"/>
+							</object>
+							</child>
+						  </object>
+						</child>
+					  </object>
+					</child>
+					<child>
+					<object class="GtkMenuItem">
+						<property name="visible">True</property>
+						<property name="can-focus">False</property>
+						<property name="label" translatable="yes">_Show</property>
+						<property name="use-underline">True</property>
+						<child type="submenu">
+						<object class="GtkMenu">
+							<property name="visible">True</property>
+							<property name="can-focus">False</property>
+							<child>
+							<object class="GtkMenuItem" id="lexicalsMenu">
+								<property name="visible">True</property>
+								<property name="can-focus">False</property>
+								<property name="label" translatable="yes">Show Lexicals</property>
+								<property name="use-underline">True</property>
+								<signal name="activate" handler="onLexicals" swapped="no"/>
+							</object>
+							</child>
+							<child>
+							<object class="GtkMenuItem" id="breakpointsMenu">
+								<property name="visible">True</property>
+								<property name="can-focus">False</property>
+								<property name="label" translatable="yes">Show Breakpoints</property>
+								<property name="use-underline">True</property>
+								<signal name="activate" handler="onBreakpoints" swapped="no"/>
+							</object>
+							</child>
+							<child>
+							<object class="GtkMenuItem" id="showSubsMenu">
+								<property name="visible">True</property>
+								<property name="can-focus">False</property>
+								<property name="label" translatable="yes">Show Subroutines</property>
+								<property name="use-underline">True</property>
+								<signal name="activate" handler="onSubs" swapped="no"/>
+							</object>
+							</child>
+							<child>
+							<object class="GtkMenuItem" id="showFilesMenu">
+								<property name="visible">True</property>
+								<property name="can-focus">False</property>
+								<property name="label" translatable="yes">Show Files</property>
+								<property name="use-underline">True</property>
+								<signal name="activate" handler="onFiles" swapped="no"/>
+							</object>
+							</child>
+						</object>
+						</child>
+					</object>
+					</child>
+					<child>
+					<object class="GtkMenuItem">
+						<property name="visible">True</property>
+						<property name="can-focus">False</property>
+						<property name="label" translatable="yes">_Themes</property>
+						<property name="use-underline">True</property>
+						<child type="submenu">
+						<object class="GtkMenu" id="themesMenu">
+							<property name="visible">True</property>
+							<property name="can-focus">False</property>
+						</object>
+						</child>
+					</object>
+					</child>
+					<child>
+					<object class="GtkMenuItem">
+						<property name="visible">True</property>
+						<property name="can-focus">False</property>
+						<property name="label" translatable="yes">_Sources</property>
+						<property name="use-underline">True</property>
+						<child type="submenu">
+						<object class="GtkMenu" id="windowMenu">
+							<property name="visible">True</property>
+							<property name="can-focus">False</property>
+						</object>
+						</child>
+					</object>
+					</child>
+				</object>
+				<packing>
+					<property name="expand">True</property>
+					<property name="fill">True</property>
+					<property name="position">0</property>
+				</packing>
+			</child>
+			<child>
+				<object class="GtkComboBoxText" id="sourcesCombo">
+				<signal name="changed" handler="onFileChoose" swapped="no"/>
+				</object>
+				<packing>
+					<property name="expand">False</property>
+					<property name="fill">False</property>
+					<property name="position">1</property>
+				</packing>
+			</child>
+		</object>
+		</child>
         <child>
           <object class="GtkBox">
             <property name="visible">True</property>

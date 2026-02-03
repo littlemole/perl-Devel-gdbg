@@ -386,10 +386,26 @@ sub onWindow {
     $openFile = $label;
 
     $widgets{sourceView}->set_buffer( $sourceBuffers{$openFile} );
-    $widgets{mainWindow}->set_title(basename($label));
-	$widgets{statusBar}->set_text(basename($label));
-	$widgets{statusBar}->set_tooltip_text($label);
+    $widgets{mainWindow}->set_title(basename($openFile));
+	$widgets{statusBar}->set_text(basename($openFile));
+	$widgets{statusBar}->set_tooltip_text($openFile);
+
+	$widgets{sourcesCombo}->set_active_id($openFile);
 }
+
+sub onFileChoose {
+
+	my $file = $widgets{sourcesCombo}->get_active_text();
+
+    $openFile = $file;
+
+    $widgets{sourceView}->set_buffer( $sourceBuffers{$openFile} );
+    $widgets{mainWindow}->set_title(basename($openFile));
+	$widgets{statusBar}->set_text(basename($openFile));
+	$widgets{statusBar}->set_tooltip_text($openFile);
+
+}
+
 
 # user closes main window
 sub onDestroy {
@@ -867,6 +883,7 @@ sub openFile {
 				$sourceBuffers{$filename}->set_text( $files{$filename}, -1 );
 			}
 		}
+		$widgets{sourcesCombo}->set_active_id($filename);
         return;
     }
 
@@ -879,6 +896,7 @@ sub openFile {
 
     # set the new buffer as current buffer for display
     $widgets{sourceView}->set_buffer($buf);
+	$widgets{sourcesCombo}->set_active_id($filename);
 
     while ( $ctx->pending() ) {
         $ctx->iteration(0);
@@ -930,6 +948,9 @@ sub loadBuffer {
 
 	$widgets{windowMenu}->add($item);
 	$widgets{windowMenu}->show_all();
+
+	$widgets{sourcesCombo}->append($file,$file);
+	$widgets{sourcesCombo}->set_active_id($file);
 
 	return $buf;
 }
@@ -1227,6 +1248,7 @@ sub mapWidgets {
       buttonHome search searchDialog
 	  searchBackward searchForward
 	  lexicalTreeView LexicalTreeStore
+	  sourcesCombo
     );
 
     foreach my $wn (@widgetNames) {
