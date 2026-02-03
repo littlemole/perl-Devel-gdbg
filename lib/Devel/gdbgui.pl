@@ -72,11 +72,10 @@ my $currentLine = 0;                  # the current line under debug
 my %files;    						  # files as seen by debugger, mapped to source
 my $uixml = $RealBin . "/gdbg.ui";    # path to glade xml ui definition
 my $pid   = 0;    					  # process ID of debugger process, to be signalled
-#my %breakpoints;    				  # remember breakpoint markers so we can delete 'em
 my $fifo;           				  # IPC with debugger backend
 my $uiDisabled = 1;					  # flag for UI disabled/enabled
-my $searchDirection = 'forward';
-my $selectedVar = "/";
+my $searchDirection = 'forward';      # search direction for text search
+my $selectedVar = "/";                # last expanded item in var inspection tree
 
 ##################################################
 # global gtk widgets
@@ -93,8 +92,8 @@ my $filesBuffer;	   # buffer to display files
 my $breakpointsBuffer; # buffer to display breakpoints
 my %sourceBuffers;     # hash of source code buffers indexed by filename
 my $ctx;               # the GTK main loop context
-my $searchSettings;
-my $searchCtx;
+my $searchSettings;    # search
+my $searchCtx;         # search
 
 
 # INT signal handler
@@ -145,8 +144,11 @@ sub onStop {
 	}
 	else {
 		my $cmd = $ENV{"GDBG_KILL_CMD"};
+
+		# if $cmd contains the string '{{PID}}',
+		# replace with current $pid
 		$cmd =~ s/\{\{PID\}\}/$pid/;
-print "$cmd\n";		
+
 		system("bash -c '$cmd'");
 	}
 }
@@ -221,17 +223,8 @@ sub onMarker {
 	{
 		return;
 	}
-	# set breakpoints and notify debugger process
-    my $bpn = $filename . ":" . $line;
-    # if ( $breakpoints{$bpn} ) {    # breakpoint already exists, remove it
-    #     $sourceBuffers{$filename}->delete_mark( $breakpoints{$bpn} );
-    #     delete $breakpoints{$bpn};
-    #     $fifo->write("delbreakpoint $filename,$line");
-    # }
-    # else {
-	print "breakpoint $filename,$line\n";
-        $fifo->write("breakpoint $filename,$line");
-#    }
+
+	$fifo->write("breakpoint $filename,$line");
 }
 
 # user selected 'Show Lexicals' from file menu
@@ -239,7 +232,6 @@ sub onLexicals {
 
     $fifo->write("lexicals");
 }
-
 
 # show breakpoints window menu handler
 sub onBreakpoints {
@@ -276,6 +268,7 @@ sub onInfoPaneClick {
 	}
 }
 
+# reload the current, active file, if any
 sub onReload {
 
 	my $widget = shift;
@@ -298,12 +291,14 @@ sub onClick {
 		return; 
 	}
 
-	if($widgets{sourceView}->get_buffer() eq $subsBuffer) {
+	my $buf = $widgets{sourceView}->get_buffer();
+
+	if($buf eq $subsBuffer) {
 
 		$fifo->write("functionbreak $text");
 		return;
 	}
-	elsif($widgets{sourceView}->get_buffer() eq $breakpointsBuffer) {
+	elsif($buf eq $breakpointsBuffer) {
 
 		if ( $text =~ /^#/) { return; }
 		if ($text =~ /([^:]+):([0-9]+)/ ) {
@@ -313,7 +308,7 @@ sub onClick {
 		}
 		return;
 	}
-	elsif($widgets{sourceView}->get_buffer() eq $filesBuffer) {
+	elsif($buf eq $filesBuffer) {
 
 		openFile($text,1);
 		return;
@@ -333,7 +328,7 @@ sub onFiles {
 	$widgets{mainWindow}->set_title("Files loaded by the debugger:");
 }
 
-# remember last selected var tree row
+# lazily load var inspection tree content
 sub onRowExpanded {
 
 	my $widget = shift;
@@ -356,7 +351,6 @@ sub onRowExpanded {
 		}
 	}
 }
-
 
 # user selected theme from Themes menu
 sub onTheme {
@@ -393,6 +387,7 @@ sub onWindow {
 	$widgets{sourcesCombo}->set_active_id($openFile);
 }
 
+# user selects source from combo box
 sub onFileChoose {
 
 	my $file = $widgets{sourcesCombo}->get_active_text();
@@ -592,6 +587,7 @@ my @msg_handlers = (
 		# quit debugger
 		regex   => qr/^quit$/s,
 		handler => sub {
+
 			$quit = 2;
 		}
 	},
@@ -599,7 +595,7 @@ my @msg_handlers = (
 		# set current work directory
 		regex   => qr/^cwd (,*)/s,
 		handler => sub {
-print STDERR "CWD: $1\n";
+
 			$widgets{statusBar}->set_text($1);
 			chdir $1;
 		}
@@ -610,11 +606,6 @@ print STDERR "CWD: $1\n";
 		handler => sub {
 
 			$pid = $1;
-print STDERR "PID: $1\n";
-
-#			foreach my $bp ( keys %breakpoints) {
-#				$fifo->write("breaktpoint $bp")
-#			}
 		}
 	},
 	{
@@ -689,7 +680,7 @@ print STDERR "PID: $1\n";
 				$model->clear;
 			}
 
-			my $root = undef;#$model->get_iter_first();
+			my $root = undef;
 			my $result = find_root($target,$root);
 			if($result->{found}) {
 				my $iter = $result->{result};
@@ -717,26 +708,6 @@ print STDERR "PID: $1\n";
 		}
 	},
 	{
-		# set a marker at file:line
-		regex   => qr/^marker ([^,]+),([0-9]*)/s,
-		handler => sub {
-
-			my $file = $1;
-			my $line = $2;
-
-			my $bpn = $file . ":" . $line;
-
-			my $buf = $sourceBuffers{$file};
-			if (!$buf) {
-
-				$buf = loadBuffer($file,$line);
-			}
-
-			my $iter = $buf->get_iter_at_line( $line - 1 );
-			$sourceBuffers{$file}->create_source_mark( $bpn, "error", $iter );
-		}
-	},
-	{
 		# set breakpoints for file
 		regex   => qr/^setbreakpoints ([^,]+),(.*)/s,
 		handler => sub {
@@ -744,8 +715,6 @@ print STDERR "PID: $1\n";
 			my $file  = $1;
 			my $lines = $2;
 			my @lines = split ',' , $lines;
-
-print "BR: $file, $lines\n";
 
 			my $buf = $sourceBuffers{$file};
 			if(!$buf) {
@@ -755,45 +724,16 @@ print "BR: $file, $lines\n";
 			my $start = $buf->get_start_iter;
 			my $end   = $buf->get_end_iter;
 
-print "rem markers\n";
 			$buf->remove_source_marks($start,$end,"error");
 
 			foreach my $line ( @lines ) {
 
-print "    $line\n";
 				my $bpn = $file . ":" . $line;
 				my $iter = $buf->get_iter_at_line( $line - 1 );
-print "----------\n";				
 				$sourceBuffers{$file}->create_source_mark( $bpn, "error", $iter );
-print "----------\n";				
 			}
 		}
 	},
-
-
-# 	{
-# 		# remove a marker at file:line
-# 		regex   => qr/^delmarker ([^,]+),([0-9]*)/s,
-# 		handler => sub {
-
-# 			my $file = $1;
-# 			my $line = $2;
-
-# 			my $bpn = $file . ":" . $line;
-# #			if ( $breakpoints{$bpn} ) {   
-				
-# 				# only if already exists
-# 				my $buf = $sourceBuffers{$file};
-# 				if ($buf) {
-
-# 					my $iter = $buf->get_iter_at_line( $line - 1 );
-
-# 					$sourceBuffers{$file}->delete_mark($breakpoints{$bpn});
-# 					delete $breakpoints{$bpn};
-# 				}
-# #			}
-# 		}
-# 	},
 	{
 		# load file,line,source
 		regex   => qr/^load ([^,]+),([0-9]+),(.*)/s,
@@ -1096,7 +1036,6 @@ sub find_root {
 		};
 		if($@) {
 
-			print STDERR $@."\n";
 			return {
 				found => 0,
 				result => undef,
@@ -1350,9 +1289,7 @@ sub build_ui {
 	# $widgets{lexicalTreeView}->append_column( $column3 );
 
 	$widgets{lexicalTreeView}->signal_connect( 'row-expanded' => \&onRowExpanded );
-
 	$widgets{lexicalTreeView}->set_enable_tree_lines(1);
-#	$widgets{jsonView}->set_buffer($lexicalsBuffer);
 
 	# buffer to show loaded subroutines
     $subsBuffer = Gtk::Source::Buffer->new();
@@ -1388,8 +1325,6 @@ sub initialize {
 
     Gtk3::init();
 
-print "-----------------------------> initialize\n";
-
     $ctx = GLib::MainContext::default();
 
     $SIG{'INT'} = "dbgui::dbint_handler";
@@ -1410,7 +1345,6 @@ print "-----------------------------> initialize\n";
 		onStop();		
 		$fifo->write("next");
 	}
-print "initialized\n";
 }
 
 ##################################################
