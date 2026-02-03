@@ -248,6 +248,15 @@
                       </object>
                     </child>
                     <child>
+                      <object class="GtkMenuItem" id="saveBreakpointsMenu">
+                        <property name="visible">True</property>
+                        <property name="can-focus">False</property>
+                        <property name="label" translatable="yes">Save Breakpoints</property>
+                        <property name="use-underline">True</property>
+                        <signal name="activate" handler="onStoreBreakpoints" swapped="no"/>
+                      </object>
+                    </child>
+                    <child>
                       <object class="GtkMenuItem" id="scrollMenu">
                         <property name="visible">True</property>
                         <property name="can-focus">False</property>

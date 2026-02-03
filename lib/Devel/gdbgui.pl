@@ -72,7 +72,7 @@ my $currentLine = 0;                  # the current line under debug
 my %files;    						  # files as seen by debugger, mapped to source
 my $uixml = $RealBin . "/gdbg.ui";    # path to glade xml ui definition
 my $pid   = 0;    					  # process ID of debugger process, to be signalled
-my %breakpoints;    				  # remember breakpoint markers so we can delete 'em
+#my %breakpoints;    				  # remember breakpoint markers so we can delete 'em
 my $fifo;           				  # IPC with debugger backend
 my $uiDisabled = 1;					  # flag for UI disabled/enabled
 my $searchDirection = 'forward';
@@ -223,14 +223,15 @@ sub onMarker {
 	}
 	# set breakpoints and notify debugger process
     my $bpn = $filename . ":" . $line;
-    if ( $breakpoints{$bpn} ) {    # breakpoint already exists, remove it
-        $sourceBuffers{$filename}->delete_mark( $breakpoints{$bpn} );
-        delete $breakpoints{$bpn};
-        $fifo->write("delbreakpoint $filename,$line");
-    }
-    else {
+    # if ( $breakpoints{$bpn} ) {    # breakpoint already exists, remove it
+    #     $sourceBuffers{$filename}->delete_mark( $breakpoints{$bpn} );
+    #     delete $breakpoints{$bpn};
+    #     $fifo->write("delbreakpoint $filename,$line");
+    # }
+    # else {
+	print "breakpoint $filename,$line\n";
         $fifo->write("breakpoint $filename,$line");
-    }
+#    }
 }
 
 # user selected 'Show Lexicals' from file menu
@@ -244,6 +245,10 @@ sub onLexicals {
 sub onBreakpoints {
 
     $fifo->write("breakpoints");
+}
+
+sub onStoreBreakpoints {
+	$fifo->write("storebreakpoints");
 }
 
 # show subroutines window menu handler
@@ -578,7 +583,7 @@ my @msg_handlers = (
 		# set current work directory
 		regex   => qr/^cwd (,*)/s,
 		handler => sub {
-print STDERR "CWD; $1\n";
+print STDERR "CWD: $1\n";
 			$widgets{statusBar}->set_text($1);
 			chdir $1;
 		}
@@ -589,11 +594,11 @@ print STDERR "CWD; $1\n";
 		handler => sub {
 
 			$pid = $1;
-print STDERR "PID; $1\n";
+print STDERR "PID: $1\n";
 
-			foreach my $bp ( keys %breakpoints) {
-				$fifo->write("breaktpoint $bp")
-			}
+#			foreach my $bp ( keys %breakpoints) {
+#				$fifo->write("breaktpoint $bp")
+#			}
 		}
 	},
 	{
@@ -712,36 +717,67 @@ print STDERR "PID; $1\n";
 			}
 
 			my $iter = $buf->get_iter_at_line( $line - 1 );
-			if ( !$breakpoints{$bpn} ) { # only if not exists
-				my $mark = $sourceBuffers{$file}
-					->create_source_mark( $bpn, "error", $iter );
-				$breakpoints{$bpn} = $mark;
-			}
+			$sourceBuffers{$file}->create_source_mark( $bpn, "error", $iter );
 		}
 	},
 	{
-		# remove a marker at file:line
-		regex   => qr/^rmarker ([^,]+),([0-9]*)/s,
+		# set breakpoints for file
+		regex   => qr/^setbreakpoints ([^,]+),(.*)/s,
 		handler => sub {
 
-			my $file = $1;
-			my $line = $2;
+			my $file  = $1;
+			my $lines = $2;
+			my @lines = split ',' , $lines;
 
-			my $bpn = $file . ":" . $line;
-			if ( $breakpoints{$bpn} ) {   
-				
-				# only if already exists
-				my $buf = $sourceBuffers{$file};
-				if ($buf) {
+print "BR: $file, $lines\n";
 
-					my $iter = $buf->get_iter_at_line( $line - 1 );
+			my $buf = $sourceBuffers{$file};
+			if(!$buf) {
+				return;
+			}
 
-					$sourceBuffers{$file}->delete_mark($breakpoints{$bpn});
-					delete $breakpoints{$bpn};
-				}
+			my $start = $buf->get_start_iter;
+			my $end   = $buf->get_end_iter;
+
+print "rem markers\n";
+			$buf->remove_source_marks($start,$end,"error");
+
+			foreach my $line ( @lines ) {
+
+print "    $line\n";
+				my $bpn = $file . ":" . $line;
+				my $iter = $buf->get_iter_at_line( $line - 1 );
+print "----------\n";				
+				$sourceBuffers{$file}->create_source_mark( $bpn, "error", $iter );
+print "----------\n";				
 			}
 		}
 	},
+
+
+# 	{
+# 		# remove a marker at file:line
+# 		regex   => qr/^delmarker ([^,]+),([0-9]*)/s,
+# 		handler => sub {
+
+# 			my $file = $1;
+# 			my $line = $2;
+
+# 			my $bpn = $file . ":" . $line;
+# #			if ( $breakpoints{$bpn} ) {   
+				
+# 				# only if already exists
+# 				my $buf = $sourceBuffers{$file};
+# 				if ($buf) {
+
+# 					my $iter = $buf->get_iter_at_line( $line - 1 );
+
+# 					$sourceBuffers{$file}->delete_mark($breakpoints{$bpn});
+# 					delete $breakpoints{$bpn};
+# 				}
+# #			}
+# 		}
+# 	},
 	{
 		# load file,line,source
 		regex   => qr/^load ([^,]+),([0-9]+),(.*)/s,
@@ -1113,6 +1149,7 @@ sub populate_item {
 				my $p = $model->get_path($iter);
 				if($p) {
 					$widgets{lexicalTreeView}->expand_to_path($p);
+					$widgets{lexicalTreeView}->scroll_to_cell($p,undef,0,0,0);					
 				}
 			}
 		}
@@ -1162,6 +1199,7 @@ sub populate_lexicals {
 			my $p = $model->get_path($iter);
 			if($p) {
 				$widgets{lexicalTreeView}->expand_to_path($p);
+				$widgets{lexicalTreeView}->scroll_to_cell($p,undef,0,0,0);	
 			}
 		}
 	}
@@ -1328,6 +1366,8 @@ sub initialize {
 
     Gtk3::init();
 
+print "-----------------------------> initialize\n";
+
     $ctx = GLib::MainContext::default();
 
     $SIG{'INT'} = "dbgui::dbint_handler";
@@ -1346,7 +1386,9 @@ sub initialize {
 
 	if ( $ENV{"GDBG_NO_FORK"} ) {
 		onStop();		
+		$fifo->write("next");
 	}
+print "initialized\n";
 }
 
 ##################################################

@@ -268,6 +268,9 @@ sub setBreakpoint {
     my $bpn = $abspath . ":" . $line;
     if ( !$breakpoints{$bpn} ) { 
 
+print "set reakpoint: $abspath:$line\n";
+
+
         # check if file is already loaded by perl
         if ( hasdblines($filename) ) {
 
@@ -275,7 +278,7 @@ sub setBreakpoint {
             my $l = setBreakpointOnNextBreakableLine($abspath,$line);
 			if($l != -1 ) {
 
-	            $fifo->write("marker $abspath,$l");
+				getBreakpointsForFile($abspath);
 			}
         }
         else {
@@ -294,10 +297,16 @@ sub setBreakpoint {
 
 				# set a new postponed breakpoint
 				push @{ $postpone{$abspath} }, $line;
-				$fifo->write("marker $abspath,$line");
+				getBreakpointsForFile($abspath);
+			}
+			else {
+				deleteBreakpoint($abspath,$line);
 			}
         }
     }
+	else {
+		deleteBreakpoint($abspath,$line);
+	}
 }
 
 # delete a breaktpoint
@@ -336,6 +345,10 @@ sub deleteBreakpoint {
 
 		$postpone{$abspath} = \@ps;
 	}
+	getBreakpointsForFile($abspath);
+
+#	$fifo->write("delmarker $abspath,$line");	
+	
 }
 
 # helper to set a postponed breakpoint
@@ -362,6 +375,31 @@ sub setPotponedBreakpoints {
 		}
 	}
 	delete $postpone{$file};
+}
+
+sub getBreakpointsForFile {
+	my $file = shift;
+	
+print "getBreakpointsForFile($file)\n";
+use Data::Dumper;
+print Dumper(\%breakpoints);
+
+	my @lines;
+	foreach my $key ( %breakpoints ) {
+		if( $key =~ /^$file:(.*)$/ ) {
+			my $line = $1;
+			push @lines, $line;
+		}
+	}
+
+	foreach my $line ( $postpone{$file}->@* ) {
+		
+		push @lines, $line;
+	}
+
+	my $lines = join ',' , @lines;
+	$lines = $lines // '';
+	$fifo->write("setbreakpoints $file,$lines"); 
 }
 
 ##############################################
@@ -527,7 +565,7 @@ sub deref {
 	if(!$ref_type) {
 		return {
 			type  => "SCALAR",
-			value => $source,
+			value => defined $source ? $source : 'undef',
 		};
 	}
 	elsif(_ARRAYLIKE($source)) {
@@ -574,14 +612,14 @@ sub deref {
 	elsif($ref_type eq 'SCALAR') {
 		return {
 			type  => "REF",
-			value => ${$source},
+			value => defined (${$source}) ? ${$source} : 'undef',
 		};
 		
 	}
 	elsif($ref_type eq 'VSTRING') {
 		return {
 			type  => "VSTRING",
-			value => $source,
+			value => defined $source ? $source : 'undef',
 		};
 		
 	}
@@ -595,14 +633,14 @@ sub deref {
 	elsif($ref_type eq 'LVALUE') {
 		return {
 			type  => "LVALUE",
-			value => $source,
+			value => defined $source ? $source : 'undef',
 		};
 		
 	}
 	elsif($ref_type eq 'REGEXP') {
 		return {
 			type  => "REGEXP",
-			value => $source,
+			value => defined $source ? $source : 'undef',
 		};
 		
 	}
@@ -653,7 +691,7 @@ sub expand_lex {
 	if(!$ref_type) {
 		return {
 			type  => "SCALAR",
-			value => $source,
+			value => defined $source ? $source : 'undef',
 		};
 	}
 	elsif(_ARRAYLIKE($source)) {
@@ -708,7 +746,7 @@ sub expand_lex {
 	elsif($ref_type eq 'FORMAT') {
 		return {
 			type  => "FORMAT",
-			value => $source,
+			value => defined $source ? $source : 'undef',
 		};
 		
 	}
@@ -722,14 +760,14 @@ sub expand_lex {
 	elsif($ref_type eq 'SCALAR') {
 		return {
 			type  => "REF",
-			value => ${$source},
+			value => defined ${$source} ? ${$source} : 'undef',
 		};
 		
 	}
 	elsif($ref_type eq 'VSTRING') {
 		return {
 			type  => "VSTRING",
-			value => $source,
+			value => defined $source ? $source : 'undef',
 		};
 		
 	}
@@ -743,14 +781,14 @@ sub expand_lex {
 	elsif($ref_type eq 'LVALUE') {
 		return {
 			type  => "LVALUE",
-			value => $source,
+			value => defined $source ? $source : 'undef',
 		};
 		
 	}
 	elsif($ref_type eq 'REGEXP') {
 		return {
 			type  => "REGEXP",
-			value => $source,
+			value => defined $source ? $source : 'undef',
 		};
 		
 	}
@@ -912,16 +950,16 @@ my @msg_handlers = (
 			setBreakpoint( $file, $line );
 		}
 	},
-	{
-		# delete breakpoint at file:line
-		regex => qr/^delbreakpoint ([^,]+),([0-9]+)$/s,
-		handler => sub {
+	# {
+	# 	# delete breakpoint at file:line
+	# 	regex => qr/^delbreakpoint ([^,]+),([0-9]+)$/s,
+	# 	handler => sub {
 
-			my $file = $1;
-			my $line = $2;
-			deleteBreakpoint( $file, $line );
-		}
-	},
+	# 		my $file = $1;
+	# 		my $line = $2;
+	# 		deleteBreakpoint( $file, $line );
+	# 	}
+	# },
 	{
 		# lookup source position of fq function
 		regex => qr/^functionbreak (.*)/s,
@@ -931,6 +969,14 @@ my @msg_handlers = (
 			my $file = find_module($fun);
 			my $line = getSubLine($fun);
 			$fifo->write("show $file,$line");
+			getBreakpointsForFile($file);
+		}
+	},
+	{
+		# dump breakpoints for display
+		regex => qr/^storebreakpoints$/s,
+		handler => sub {
+			dumpBreakpoints();
 		}
 	},
 	{
@@ -1040,6 +1086,7 @@ sub DB {
 
         # move UI to current file:line
         $fifo->write("file $abspath,$line");
+		getBreakpointsForFile($abspath);
 
         # update the info pane call frame stack
         updateInfo( $package, $filename, $line );
