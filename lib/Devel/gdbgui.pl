@@ -1440,8 +1440,6 @@ while ( !$quit ) {
 
 if ( $quit == 1 ) 
 {
-	if(!$ENV{"GDBG_NO_FORK"}) {
-	    $fifo->write("quit");
-	}
+	$fifo->write("quit");
 }
 

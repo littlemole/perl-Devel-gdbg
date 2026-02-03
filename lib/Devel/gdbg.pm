@@ -825,8 +825,10 @@ my @msg_handlers = (
 		handler => sub {
 
 			dumpBreakpoints();
-			$fifo->close();
-			POSIX::_exit(0);
+			if(!$ENV{"GDBG_NO_FORK"}) {			
+				$fifo->close();
+				POSIX::_exit(0);
+			}
 		}
 	},
 	{
