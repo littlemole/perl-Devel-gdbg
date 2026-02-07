@@ -23,7 +23,8 @@ if ( !$ENV{"GDBG_NO_FORK"} ) {
     if ( $pid == 0 ) {
 
         # child displays UI
-        exec("perl $ui");
+		# $^X is the path to current perl executable
+        exec("$^X $ui");
     }
 }
 
@@ -79,7 +80,6 @@ my $lastSelection = '';
 
 # INT signal handler
 sub dbint_handler {
-	print STDERR "SIGINT\n";
     $DB::single = 1;
 }
 
@@ -96,10 +96,10 @@ my $fifo = Devel::dipc->new();
 $fifo->open_out("$fifo_dir/perl_debugger_fifo_out");
 $fifo->open_in("$fifo_dir/perl_debugger_fifo_in");
 
-restoreBreakpoints();
-
 $fifo->write( "cwd " . getcwd() );
 $fifo->write( "pid " . $$ );
+
+restoreBreakpoints();
 
 # start non tracing
 $DB::trace = 0;
@@ -180,31 +180,6 @@ sub find_module {
     return $fun;
 }
 
-sub restoreBreakpoints {
-
-    if ( -e ".pgdbbrkpts" ) {
-        my @lines = slurp(".pgdbbrkpts");
-        foreach my $line (@lines) {
-            if ( $line =~ /^([^:]+):([0-9]+)/ ) {
-                my $file = $1;
-                my $line = $2;
-                if ( !$postpone{$file} ) {
-                    $postpone{$file} = [];
-                }
-                push @{ $postpone{$file} }, $line;
-            }
-        }
-    }
-}
-
-sub dumpBreakpoints {
-
-    my @a;
-    foreach my $key ( keys %breakpoints ) {
-        push @a, $key . "\n";
-    }
-    write_file( ".pgdbbrkpts", @a );
-}
 
 ##################################################
 # breakpoint handling
@@ -393,6 +368,34 @@ sub getBreakpointsForFile {
 	$fifo->write("setbreakpoints $file,$lines"); 
 }
 
+# helper to load persited breakpoints from disk
+sub restoreBreakpoints {
+
+    if ( -e ".pgdbbrkpts" ) {
+        my @lines = slurp(".pgdbbrkpts");
+        foreach my $line (@lines) {
+            if ( $line =~ /^([^:]+):([0-9]+)/ ) {
+                my $file = $1;
+                my $line = $2;
+                if ( !$postpone{$file} ) {
+                    $postpone{$file} = [];
+                }
+                push @{ $postpone{$file} }, $line;
+            }
+        }
+    }
+}
+
+# helper to persist breakpoints on disk
+sub dumpBreakpoints {
+
+    my @a;
+    foreach my $key ( keys %breakpoints ) {
+        push @a, $key . "\n";
+    }
+    write_file( ".pgdbbrkpts", @a );
+}
+
 ##############################################
 # update the call frame stack info
 ##############################################
@@ -441,6 +444,266 @@ sub updateInfo {
     my $abspath = abs_path(find_file($filename));
     my $msg = $abspath . "," . $line . "," . $info. "\n";
     $fifo->write("info $msg");
+}
+
+##################################################
+# var inspector support
+##################################################
+
+
+sub truncate_lex {
+	my $value = shift;
+	
+	$value = defined $value ? $value : 'undef';
+	$value = "$value";
+
+	return substr($value,0,255);
+}
+
+sub deref {
+
+	my ($source,$start,$target) = shift;
+
+	my $ref_type = ref $source;
+	if(!$ref_type) {
+		return {
+			type  => "SCALAR",
+			value => truncate_lex( $source ),
+		};
+	}
+	elsif(_ARRAYLIKE($source)) {
+		my @result;
+		foreach my $item ( $source->@* ) {
+			push @result, deref($item,$target);
+		}
+		return {
+			type  => $ref_type,
+			value => \@result,
+		};
+	}
+	elsif(_HASHLIKE($source)) {
+		my %result;
+		foreach my $item ( keys $source->%* ) {
+			$result{$item} = deref($source->{$item},$target);
+		}
+		return {
+			type  => $ref_type,
+			value => \%result,
+		};
+	}
+	elsif($ref_type eq 'CODE') {
+		return {
+			type  => "CODE",
+			value => '<>',
+		};
+
+	}
+	elsif($ref_type eq 'FORMAT') {
+		return {
+			type  => "FORMAT",
+			value => truncate_lex( $source )
+		};
+		
+	}
+	elsif($ref_type eq 'IO') {
+		return {
+			type  => "IO",
+			value => '<>',
+		};
+		
+	}
+	elsif($ref_type eq 'SCALAR') {
+		return {
+			type  => "REF",
+			value => truncate_lex( ${$source} ),
+		};
+		
+	}
+	elsif($ref_type eq 'VSTRING') {
+		return {
+			type  => "VSTRING",
+			value => truncate_lex( $source ),
+		};
+		
+	}
+	elsif($ref_type eq 'GLOB') {
+		return {
+			type  => "GLOB",
+			value => '<>',
+		};
+		
+	}
+	elsif($ref_type eq 'LVALUE') {
+		return {
+			type  => "LVALUE",
+			value => truncate_lex( $source ),
+		};
+		
+	}
+	elsif($ref_type eq 'REGEXP') {
+		return {
+			type  => "REGEXP",
+			value => truncate_lex( $source ),
+		};
+		
+	}
+	elsif($ref_type eq 'REF') {
+		return deref( ${$source});
+	}
+	return {
+		type  => $ref_type,
+		value => undef,
+	};
+}
+
+sub find_lex_src {
+
+	my ($source,$target) = @_;
+
+	if (ref $source eq 'REF') {
+		$source = ${$source};
+	}
+	
+	if( (scalar @$target) == 0 ) {
+		return $source;
+	}
+
+	my $p = shift $target->@*;
+
+	if(_HASHLIKE($source)) {
+		my $i = $source->{$p};
+		return find_lex_src( $i, $target );
+	}
+	elsif(_ARRAYLIKE($source)) {
+		my $i = $source->[$p];
+		return find_lex_src( $i, $target );
+	}
+	else {
+		return;
+	}
+
+	return;
+}
+
+
+sub expand_lex {
+	my ($source,$isRoot,$level) = @_;
+
+	$level = $level // 0;
+
+	my $ref_type = ref $source;
+	if(!$ref_type) {
+		return {
+			type  => "SCALAR",
+			value => truncate_lex( $source ),
+		};
+	}
+	elsif(_ARRAYLIKE($source)) {
+		if($level == 0 || $isRoot) {
+			my @result;
+			my $c = 0;
+			foreach my $item ( $source->@* ) {
+				my $expand = 0;
+				if(index($lastSelection,"$c") == 0) {
+					$expand = 1;
+				}
+				push @result, expand_lex($item,$isRoot,$level+1);
+				$c++;
+			}
+			return {
+				type  => $ref_type,
+				value => \@result,
+			};
+		}
+		return {
+			type  => $ref_type,
+			placeholder => 1,
+		};
+	}
+	elsif(_HASHLIKE($source)) {
+		if($level == 0 || $isRoot ) {
+			my %result;
+			foreach my $item ( keys $source->%* ) {
+				my $expand = '';
+				if(index("/$lastSelection","$isRoot/$item") == 0) {
+					$expand = "$isRoot/$item";
+				}
+				$result{$item} = expand_lex($source->{$item},$expand,$level+1);
+			}
+			return {
+				type  => $ref_type,
+				value => \%result,
+			};
+		}
+		return {
+			type  => $ref_type,
+			placeholder => 1,
+		};
+	}
+	elsif($ref_type eq 'CODE') {
+		return {
+			type  => "CODE",
+			value => '<>',
+		};
+
+	}
+	elsif($ref_type eq 'FORMAT') {
+		return {
+			type  => "FORMAT",
+			value => truncate_lex( $source ),
+		};
+		
+	}
+	elsif($ref_type eq 'IO') {
+		return {
+			type  => "IO",
+			value => '<>',
+		};
+		
+	}
+	elsif($ref_type eq 'SCALAR') {
+		return {
+			type  => "REF",
+			value => truncate_lex( ${$source} ),
+		};
+		
+	}
+	elsif($ref_type eq 'VSTRING') {
+		return {
+			type  => "VSTRING",
+			value => truncate_lex( $source )
+		};
+		
+	}
+	elsif($ref_type eq 'GLOB') {
+		return {
+			type  => "GLOB",
+			value => '<>',
+		};
+		
+	}
+	elsif($ref_type eq 'LVALUE') {
+		return {
+			type  => "LVALUE",
+			value => truncate_lex( $source )
+		};
+		
+	}
+	elsif($ref_type eq 'REGEXP') {
+		return {
+			type  => "REGEXP",
+			value => truncate_lex( $source )
+		};
+		
+	}
+	elsif($ref_type eq 'REF') {
+		return expand_lex( ${$source}, $isRoot, $level);
+	}
+	return {
+		type  => $ref_type,
+		value => undef,
+	};
+
 }
 
 ##################################################
@@ -544,254 +807,6 @@ sub getSubs {
 	return $result;
 }
 
-##################################################
-# var inspector support
-##################################################
-
-sub deref {
-
-	my ($source,$start,$target) = shift;
-
-	my $ref_type = ref $source;
-	if(!$ref_type) {
-		return {
-			type  => "SCALAR",
-			value => defined $source ? $source : 'undef',
-		};
-	}
-	elsif(_ARRAYLIKE($source)) {
-		my @result;
-		foreach my $item ( $source->@* ) {
-			push @result, deref($item,$target);
-		}
-		return {
-			type  => $ref_type,
-			value => \@result,
-		};
-	}
-	elsif(_HASHLIKE($source)) {
-		my %result;
-		foreach my $item ( keys $source->%* ) {
-			$result{$item} = deref($source->{$item},$target);
-		}
-		return {
-			type  => $ref_type,
-			value => \%result,
-		};
-	}
-	elsif($ref_type eq 'CODE') {
-		return {
-			type  => "CODE",
-			value => '<>',
-		};
-
-	}
-	elsif($ref_type eq 'FORMAT') {
-		return {
-			type  => "FORMAT",
-			value => $source,
-		};
-		
-	}
-	elsif($ref_type eq 'IO') {
-		return {
-			type  => "IO",
-			value => '<>',
-		};
-		
-	}
-	elsif($ref_type eq 'SCALAR') {
-		return {
-			type  => "REF",
-			value => defined (${$source}) ? ${$source} : 'undef',
-		};
-		
-	}
-	elsif($ref_type eq 'VSTRING') {
-		return {
-			type  => "VSTRING",
-			value => defined $source ? $source : 'undef',
-		};
-		
-	}
-	elsif($ref_type eq 'GLOB') {
-		return {
-			type  => "GLOB",
-			value => '<>',
-		};
-		
-	}
-	elsif($ref_type eq 'LVALUE') {
-		return {
-			type  => "LVALUE",
-			value => defined $source ? $source : 'undef',
-		};
-		
-	}
-	elsif($ref_type eq 'REGEXP') {
-		return {
-			type  => "REGEXP",
-			value => defined $source ? $source : 'undef',
-		};
-		
-	}
-	elsif($ref_type eq 'REF') {
-		return deref( ${$source});
-	}
-	return {
-		type  => $ref_type,
-		value => undef,
-	};
-}
-
-sub find_lex_src {
-
-	my ($source,$target) = @_;
-
-	if (ref $source eq 'REF') {
-		$source = ${$source};
-	}
-	
-	if( (scalar @$target) == 0 ) {
-		return $source;
-	}
-
-	my $p = shift $target->@*;
-
-	if(_HASHLIKE($source)) {
-		my $i = $source->{$p};
-		return find_lex_src( $i, $target );
-	}
-	elsif(_ARRAYLIKE($source)) {
-		my $i = $source->[$p];
-		return find_lex_src( $i, $target );
-	}
-	else {
-		return;
-	}
-
-	return;
-}
-
-sub expand_lex {
-	my ($source,$isRoot,$level) = @_;
-
-	$level = $level // 0;
-
-	my $ref_type = ref $source;
-	if(!$ref_type) {
-		return {
-			type  => "SCALAR",
-			value => defined $source ? $source : 'undef',
-		};
-	}
-	elsif(_ARRAYLIKE($source)) {
-		if($level == 0 || $isRoot) {
-			my @result;
-			my $c = 0;
-			foreach my $item ( $source->@* ) {
-				my $expand = 0;
-				if(index($lastSelection,"$c") == 0) {
-					$expand = 1;
-				}
-				push @result, expand_lex($item,$isRoot,$level+1);
-				$c++;
-			}
-			return {
-				type  => $ref_type,
-				value => \@result,
-			};
-		}
-		return {
-			type  => $ref_type,
-			placeholder => 1,
-		};
-	}
-	elsif(_HASHLIKE($source)) {
-		if($level == 0 || $isRoot ) {
-			my %result;
-			foreach my $item ( keys $source->%* ) {
-				my $expand = '';
-				if(index("/$lastSelection","$isRoot/$item") == 0) {
-					$expand = "$isRoot/$item";
-				}
-				$result{$item} = expand_lex($source->{$item},$expand,$level+1);
-			}
-			return {
-				type  => $ref_type,
-				value => \%result,
-			};
-		}
-		return {
-			type  => $ref_type,
-			placeholder => 1,
-		};
-	}
-	elsif($ref_type eq 'CODE') {
-		return {
-			type  => "CODE",
-			value => '<>',
-		};
-
-	}
-	elsif($ref_type eq 'FORMAT') {
-		return {
-			type  => "FORMAT",
-			value => defined $source ? $source : 'undef',
-		};
-		
-	}
-	elsif($ref_type eq 'IO') {
-		return {
-			type  => "IO",
-			value => '<>',
-		};
-		
-	}
-	elsif($ref_type eq 'SCALAR') {
-		return {
-			type  => "REF",
-			value => defined ${$source} ? ${$source} : 'undef',
-		};
-		
-	}
-	elsif($ref_type eq 'VSTRING') {
-		return {
-			type  => "VSTRING",
-			value => defined $source ? $source : 'undef',
-		};
-		
-	}
-	elsif($ref_type eq 'GLOB') {
-		return {
-			type  => "GLOB",
-			value => '<>',
-		};
-		
-	}
-	elsif($ref_type eq 'LVALUE') {
-		return {
-			type  => "LVALUE",
-			value => defined $source ? $source : 'undef',
-		};
-		
-	}
-	elsif($ref_type eq 'REGEXP') {
-		return {
-			type  => "REGEXP",
-			value => defined $source ? $source : 'undef',
-		};
-		
-	}
-	elsif($ref_type eq 'REF') {
-		return expand_lex( ${$source}, $isRoot, $level);
-	}
-	return {
-		type  => $ref_type,
-		value => undef,
-	};
-
-}
 
 ##################################################
 # process messages from ui
@@ -807,7 +822,6 @@ my @msg_handlers = (
 
 			# send PID of current process to UI
 			$fifo->write( "pid " . $$ );
-
 		}
 	},
 	{
@@ -859,16 +873,9 @@ my @msg_handlers = (
 		handler => sub {
 
 		    $DB::trace = 1;
-			if ( 0 ) { # $depth > 0 ) {
-				$breakout   = 1;
-				$stepout    = 1;
-				$DB::single = 0;
-			}
-			else {
-				$breakout   = 1;
-				$DB::single = 0;
-				$stepover   = $depth;
-			}
+			$breakout   = 1;
+			$DB::single = 0;
+			$stepover   = $depth;
 		}
 	},
 	{
@@ -889,7 +896,6 @@ my @msg_handlers = (
 		handler => sub {
 
 			my $h = peek_my(3);
-			$lexicals = $h;
 			my $info = Dumper($h);
 			$info =~ s/    / /gm;
 
@@ -904,36 +910,31 @@ my @msg_handlers = (
 		handler => sub {
 
 			my $target = $1;
-			my $h = peek_my(3);
+			my $source = peek_my(3);
 
 			$target =~ s/^\///;
 			$target =~ s/\/$//;
 
 			my @t = split( /\//, $target );
 
-			my $isRoot = '';
 			if( scalar @t != 0) {
 				$lastSelection = $target;
 			}
-			else {
-				$isRoot = '';
-			}
 
-			my $r = find_lex_src($h,\@t);
-			my $d = {};
+			my $result = find_lex_src($source,\@t);
+			my $data = {};
 
-			if($r) {
+			if($result) {
 
-				$d = expand_lex($r,$isRoot);
+				$data = expand_lex($result,'');
 			}
 
 			my $json = JSON->new()->allow_blessed()->allow_unknown();
-			my $info = $json->utf8->encode($d);
+			my $info = $json->utf8->encode($data);
 			my $msg = $currentFile . ",/" . $target . "," . $info;
 			$fifo->write("jsonlexicals $msg");
 		}
 	},
-
 	{
 		# set breakpoint at file:line
 		regex => qr/^breakpoint ([^,]+),([0-9]+)$/s,
@@ -1170,6 +1171,7 @@ sub sub {
 }
 
 # called from Perl in debug mode, once files have been loaded
+
 sub postponed {
 
     my $id = shift;
@@ -1211,11 +1213,10 @@ END {
 1;
 
 __END__
-# Below is stub documentation for your module. You'd better edit it!
 
 =head1 NAME
 
-Devel::gdbg - Perl Debugger using Gtk on Linux
+Devel::gdbg - Perl Debugger using Gtk
 
 =head1 SYNOPSIS
 
@@ -1249,7 +1250,7 @@ littlemole@oha7.org
 
 =head1 COPYRIGHT AND LICENSE
 
-Copyright (C) 2024 by littlemole
+Copyright (C) 2024-2026 by littlemole
 
 This library is free software; you can redistribute it and/or modify
 it under the same terms as Perl itself, either Perl version 5.34.0 or,

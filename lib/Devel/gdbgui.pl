@@ -69,20 +69,20 @@ my $quit        = 0;                  # stop the UI
 my $openFile    = "";                 # the currently shown file
 my $currentFile = "";                 # the current file of debugging
 my $currentLine = 0;                  # the current line under debug
-my %files;    						  # files as seen by debugger, mapped to source
-my $uixml = $RealBin . "/gdbg.ui";    # path to glade xml ui definition
+my %files;    						  # files loaded, mapped to source
 my $pid   = 0;    					  # process ID of debugger process, to be signalled
 my $fifo;           				  # IPC with debugger backend
 my $uiDisabled = 1;					  # flag for UI disabled/enabled
 my $searchDirection = 'forward';      # search direction for text search
 my $selectedVar = "/";                # last expanded item in var inspection tree
+my $uixml = $RealBin . "/gdbg.ui";    # path to glade xml ui definition
 
 ##################################################
 # global gtk widgets
 ##################################################
 
 my %widgets;           # UI widgets indexed by widget id
-my $langManager;       # gtsk source language manager
+my $langManager;       # gtk source language manager
 my $lang;              # gtk source view language (perl)
 my $scheme;            # gtk source view theme to use
 my $infoBuffer;        # the buffer displaying  call frame stack info
@@ -405,9 +405,6 @@ sub onFileChoose {
 # user closes main window
 sub onDestroy {
 
-	if(!$ENV{"GDBG_KILL_CMD"}) {
-    	kill 'INT', $pid;
-	}
     $quit = 1;
 }
 
@@ -745,6 +742,7 @@ my @msg_handlers = (
 			$widgets{statusBar}->set_text("$file");
 
 			$files{$file} = $src;
+			# discuss whether this if is a good idea?
 			if ( $file !~ /^\/usr\// ) {
 				scroll($file,$line);
 			}
@@ -787,10 +785,10 @@ sub process_msg {
 	}
 }
 
-##################################################
-# logic
-##################################################
 
+##################################################
+# UI helpers
+##################################################
 
 # open a new file in the visual debugger
 sub openFile {
@@ -843,11 +841,6 @@ sub openFile {
     }	
 }
 
-
-##################################################
-# UI helpers
-##################################################
-
 # load a file into a new source buffer
 sub loadBuffer {
 
@@ -889,6 +882,7 @@ sub loadBuffer {
 	$widgets{windowMenu}->add($item);
 	$widgets{windowMenu}->show_all();
 
+	# also add to combo box
 	$widgets{sourcesCombo}->append($file,$file);
 	$widgets{sourcesCombo}->set_active_id($file);
 
@@ -945,7 +939,7 @@ sub getLineFromMouseClick {
 	# adjust the iter again, now have correct line
 	$iter->backward_line();
 
-	# the the line source text
+	# the line source text
 	my $text = getLine($iter,$widget->get_buffer(),$line);
 
 	return $text;
@@ -1066,23 +1060,36 @@ sub find_root {
 	};
 }
 
+sub GValue {
+
+	my $value = shift;
+	my $type  = shift || "Glib::String";
+
+	# https://metacpan.org/pod/Glib
+	# G_TYPE_STRING     Glib::String
+	# G_TYPE_INT        Glib::Int
+	# G_TYPE_UINT       Glib::UInt
+	# G_TYPE_DOUBLE     Glib::Double
+	# G_TYPE_BOOLEAN    Glib::Boolean
+
+	# create a GValue
+	my $gv = Glib::Object::Introspection::GValueWrapper->new ( $type, $value);
+	return $gv;
+}
+
 sub populate_item {
 
 	my ($model,$iter,$key,$item,$path) = @_;
 
-	my $gv = Glib::Object::Introspection::GValueWrapper->new ("Glib::String", $key);
-	$model->set_value($iter,0,$gv);
-
-	$gv = Glib::Object::Introspection::GValueWrapper->new ("Glib::String", $path);
-	$model->set_value($iter,2,$gv);
+	$model->set_value($iter,0,GValue($key));
+	$model->set_value($iter,2,GValue($path));
 
 	if($item->{placeholder}) {
 
-		my $gv = Glib::Object::Introspection::GValueWrapper->new ("Glib::String", $item->{type});
-		$model->set_value($iter,1,$gv);
+		$model->set_value($iter,1,GValue($item->{type}));
 
 		my $it = $model->append($iter);
-		$gv = Glib::Object::Introspection::GValueWrapper->new ("Glib::String", '');
+		my $gv = GValue('');
 		$model->set_value($it,0,$gv);
 		$model->set_value($it,1,$gv);
 		$model->set_value($it,2,$gv);
@@ -1090,15 +1097,15 @@ sub populate_item {
 	}
 
 	if( $item->{type} eq 'REF' || $item->{type} eq 'SCALAR') {
-		my $gv = Glib::Object::Introspection::GValueWrapper->new ("Glib::String", $item->{value});
+		my $gv = GValue($item->{value});
 		$model->set_value($iter,1,$gv);
 	}
 	elsif( $item->{type} eq 'CODE' || $item->{type} eq 'IO' || $item->{type} eq 'GLOB'  ) {
-		my $gv = Glib::Object::Introspection::GValueWrapper->new ("Glib::String", $item->{type});
+		my $gv = GValue($item->{type});
 		$model->set_value($iter,1,$gv);
 	}
 	else {
-		my $gv = Glib::Object::Introspection::GValueWrapper->new ("Glib::String", $item->{type});
+		my $gv = GValue($item->{type});
 		$model->set_value($iter,1,$gv);
 		if( defined $item->{value} ) {
 			populate_lexicals($item,$model,$iter,$path);
@@ -1210,7 +1217,7 @@ sub build_ui {
     my $builder = Gtk3::Builder->new();
     $builder->add_from_file($uixml) or die 'file not found';
 
-	# get refrences to widgets
+	# get references to widgets
     mapWidgets($builder);
 
 	# connect UI signal handlers
@@ -1244,7 +1251,7 @@ sub build_ui {
 	# default schema
     $scheme = $manager->get_scheme("solarized-dark");
 
-	# preapre the info buffer to display call stack
+	# prepare the info buffer to display call stack
     $infoBuffer = $widgets{infoPane}->get_buffer();
     $widgets{infoPane}->set_editable(0);
     $infoBuffer->set_style_scheme($scheme);
@@ -1254,11 +1261,28 @@ sub build_ui {
     $lexicalsBuffer->set_language($lang);
     $lexicalsBuffer->set_style_scheme($scheme);
 
+	# buffer to show loaded subroutines
+    $subsBuffer = Gtk::Source::Buffer->new();
+    $subsBuffer->set_style_scheme($scheme);
+
+	# buffer to show loaded files
+    $filesBuffer = Gtk::Source::Buffer->new();
+    $filesBuffer->set_style_scheme($scheme);
+
+	# buffer to show loaded breakpoints
+    $breakpointsBuffer = Gtk::Source::Buffer->new();
+    $breakpointsBuffer->set_style_scheme($scheme);
+
+	# prepare the var inspection tree view
 	my $treeModel = $widgets{LexicalTreeStore};
 	$widgets{lexicalTreeView}->set_model($treeModel);
 
 	my $renderer1 = Gtk3::CellRendererText->new ();
 	my $renderer2 = Gtk3::CellRendererText->new ();
+
+	# enable if you want to see the hidden 'path' data
+	# value of the the tree view in the third column
+
 	#my $renderer3 = Gtk3::CellRendererText->new ();
 
 	my $column1 = Gtk3::TreeViewColumn->new();
@@ -1279,6 +1303,9 @@ sub build_ui {
 	$column2->add_attribute($renderer2,"text",1);
 	$widgets{lexicalTreeView}->append_column( $column2 );
 
+	# enable if you want to see the hidden 'path' data
+	# value of the the tree view in the third column
+
 	# my $column3 = Gtk3::TreeViewColumn->new();
 	# $column3->set_resizable(1);
 	# $column3->set_sizing('fixed');
@@ -1291,18 +1318,6 @@ sub build_ui {
 	$widgets{lexicalTreeView}->signal_connect( 'row-expanded' => \&onRowExpanded );
 	$widgets{lexicalTreeView}->set_enable_tree_lines(1);
 
-	# buffer to show loaded subroutines
-    $subsBuffer = Gtk::Source::Buffer->new();
-    $subsBuffer->set_style_scheme($scheme);
-
-	# buffer to show loaded files
-    $filesBuffer = Gtk::Source::Buffer->new();
-    $filesBuffer->set_style_scheme($scheme);
-
-	# buffer to show loaded breakpoints
-    $breakpointsBuffer = Gtk::Source::Buffer->new();
-    $breakpointsBuffer->set_style_scheme($scheme);
-
 	# prepare search support
 	$searchSettings = Gtk::Source::SearchSettings->new();
 	$searchSettings->set_wrap_around(1);
@@ -1311,6 +1326,8 @@ sub build_ui {
 	
 	# set everything to disabled on startup
     enableButtons(0);
+
+	# enable button stop, just to be sure
     $widgets{buttonStop}->set_sensitive(1);
 
     # show the UI
@@ -1331,11 +1348,10 @@ sub initialize {
 
     # the IPC named pipe (fifo) for comms with the debugger
 
-    $fifo = Devel::dipc->new();
 
 	my $fifo_dir = $ENV{"GDBG_FIFO_DIR"} || '/tmp/';
 
-    # this will hang until the Debugger has connected
+    $fifo = Devel::dipc->new();
     $fifo->open_in("$fifo_dir/perl_debugger_fifo_out");
     $fifo->open_out("$fifo_dir/perl_debugger_fifo_in");
 
@@ -1345,6 +1361,8 @@ sub initialize {
 		onStop();		
 		$fifo->write("next");
 	}
+
+	build_ui();
 }
 
 ##################################################
@@ -1352,7 +1370,6 @@ sub initialize {
 ##################################################
 
 initialize();
-build_ui();
 
 while ( !$quit ) {
 
@@ -1374,6 +1391,9 @@ while ( !$quit ) {
 
 if ( $quit == 1 ) 
 {
+	if(!$ENV{"GDBG_KILL_CMD"}) {
+    	kill 'INT', $pid;
+	}
 	$fifo->write("quit");
 }
 
