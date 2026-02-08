@@ -7,6 +7,7 @@ use POSIX qw(mkfifo);
 use IO::Select;
 use Encode;
 use Fcntl;
+use JSON;
 
 ##############################n###########
 # bi-direktional IPC via a pair of
@@ -71,7 +72,12 @@ sub write {
     my $self = shift;
     my $msg  = shift;
 
-    my $data = $self->_encode_msg($msg);
+#    my $data = $self->_encode_msg($msg);
+
+	my $json = JSON->new()->allow_blessed()->allow_unknown();
+
+	my $jsondata = $json->utf8->encode($msg);
+	my $data = $self->_encode_msg($jsondata);
 
     my $fh = $self->{fout};
     print $fh $data;
@@ -131,7 +137,8 @@ sub _read_data {
 
     if ( length( $self->{buf} ) == $self->{datalen} ) {
 
-        my $msg = Encode::decode_utf8( $self->{buf} );
+#        my $msg = Encode::decode_utf8( $self->{buf} );
+		my $msg = decode_json( $self->{buf} );
 
         $self->{buf}     = undef;
         $self->{datalen} = 0;
@@ -209,5 +216,33 @@ sub _makemyfifo {
 
     mkfifo( $path, 0777 ) || die "mkfifo $path already exists: $!"; 
 }
+
+
+package Devel::dipc::RPC;
+
+sub new {
+
+    my $class = shift;
+	my $fifo  = shift;
+
+    my $self = {
+		fifo => $fifo,
+    };
+
+    bless $self, $class;
+
+    return $self;	
+}
+
+sub AUTOLOAD {
+
+	no strict;
+	my $self = shift;
+	(my $method = $AUTOLOAD) =~ s{.*::}{};
+
+	use strict;
+	$self->{fifo}->write( { cmd => $method, params => [ @_ ] });
+}
+
 
 1;

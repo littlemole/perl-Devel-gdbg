@@ -96,8 +96,8 @@ my $fifo = Devel::dipc->new();
 $fifo->open_out("$fifo_dir/perl_debugger_fifo_out");
 $fifo->open_in("$fifo_dir/perl_debugger_fifo_in");
 
-$fifo->write( "cwd " . getcwd() );
-$fifo->write( "pid " . $$ );
+$fifo->write({cmd => "cwd", params => [ getcwd() ]} );
+$fifo->write({cmd => "pid", params => [ $$ ]} );
 
 restoreBreakpoints();
 
@@ -365,7 +365,7 @@ sub getBreakpointsForFile {
 
 	my $lines = join ',' , @lines;
 	$lines = $lines // '';
-	$fifo->write("setbreakpoints $file,$lines"); 
+	$fifo->write( { cmd => "setbreakpoints", params => [$file,$lines]}); 
 }
 
 # helper to load persited breakpoints from disk
@@ -442,8 +442,7 @@ sub updateInfo {
 
 	# update the UI
     my $abspath = abs_path(find_file($filename));
-    my $msg = $abspath . "," . $line . "," . $info. "\n";
-    $fifo->write("info $msg");
+    $fifo->write( { cmd => "info", params => [ $abspath,$line,$info ]});
 }
 
 ##################################################
@@ -466,6 +465,12 @@ sub deref {
 
 	my $ref_type = ref $source;
 	if(!$ref_type) {
+		if( ref \$source eq 'GLOB') {
+			return {
+				type  => "GLOB",
+				value => '*',
+			};
+		}
 		return {
 			type  => "SCALAR",
 			value => truncate_lex( $source ),
@@ -593,6 +598,12 @@ sub expand_lex {
 
 	my $ref_type = ref $source;
 	if(!$ref_type) {
+		if( ref \$source eq 'GLOB') {
+			return {
+				type  => "GLOB",
+				value => '*',
+			};
+		}
 		return {
 			type  => "SCALAR",
 			value => truncate_lex( $source ),
@@ -812,199 +823,143 @@ sub getSubs {
 # process messages from ui
 ##################################################
 
-my @msg_handlers = (
-	{
-		regex => qr/^init$/s,
-		handler => sub {
+my %msg_handlers = (
+	init => sub {
+		# send current working dir to UI
+		$fifo->write( { cmd => "cwd", params => [getcwd()]} );
 
-			# send current working dir to UI
-			$fifo->write( "cwd " . getcwd() );
+		# send PID of current process to UI
+		$fifo->write( { cmd => "pid", params => [ $$ ]} );
+	},
+	quit => sub {
 
-			# send PID of current process to UI
-			$fifo->write( "pid " . $$ );
+		dumpBreakpoints();
+		if(!$ENV{"GDBG_NO_FORK"}) {			
+			$fifo->close();
+			POSIX::_exit(0);
 		}
 	},
-	{
-		# quit debugger
-		regex => qr/^quit$/s,
-		handler => sub {
-
-			dumpBreakpoints();
-			if(!$ENV{"GDBG_NO_FORK"}) {			
-				$fifo->close();
-				POSIX::_exit(0);
-			}
-		}
-	},
-	{
+	step => sub {
 		# single step (into)
-		regex => qr/^step$/s,
-		handler => sub {
-
-			$breakout   = 1;
-			$DB::single = 1;
-			$DB::trace  = 1;
-		}
+		$breakout   = 1;
+		$DB::single = 1;
+		$DB::trace  = 1;
 	},
-	{
+	continue => sub {
 		# continue to next breakpoint
-		regex => qr/^continue$/s,
-		handler => sub {
 
-			$breakout   = 1;
-			$DB::single = 0;
-			$DB::trace  = 0;
-		}
+		$breakout   = 1;
+		$DB::single = 0;
+		$DB::trace  = 0;
 	},
-	{
+	next => sub {
 		# single step (over)
-		regex => qr/^next$/s,
-		handler => sub {
-
-			$breakout   = 1;
-			$DB::single = 0;
-			$DB::trace  = 1;
-			$stepover   = $depth + 1;
-		}
+		$breakout   = 1;
+		$DB::single = 0;
+		$DB::trace  = 1;
+		$stepover   = $depth + 1;
 	},
-	{
+	return => sub {
 		# (single) step out of function
-		regex => qr/^return$/s,
-		handler => sub {
-
-		    $DB::trace = 1;
-			$breakout   = 1;
-			$DB::single = 0;
-			$stepover   = $depth;
-		}
+		$DB::trace = 1;
+		$breakout   = 1;
+		$DB::single = 0;
+		$stepover   = $depth;
 	},
-	{
+	eval => sub {
 		# eval in current context
-		regex => qr/^eval (.*)$/ms,
-		handler => sub {
-
-			my $r = eval($1);
-			if ($@) {
-				$r = $@;
-			}
-			$fifo->write("eval $r");
+		my $r = eval(shift);
+		if ($@) {
+			$r = $@;
 		}
+		$fifo->write( { cmd => "eval", params => [ $r ]} );
 	},
-	{
+	lexicals => sub {
 		# show lexicals
-		regex => qr/^lexicals$/s,
-		handler => sub {
+		my $h = peek_my(3);
+		my $info = Dumper($h);
+		$info =~ s/    / /gm;
 
-			my $h = peek_my(3);
-			my $info = Dumper($h);
-			$info =~ s/    / /gm;
-
-			my $msg = $currentFile . "," . $currentLine . "," . $info;
-
-			$fifo->write("lexicals $msg");
-		}
+		$fifo->write( { cmd => "lexicals", params => [ $currentFile,$currentLine,$info ]} );
 	},
-	{
+	jsonlexicals => sub {
 		# show lexicals JSON
-		regex => qr/^jsonlexicals (.*)$/s,
-		handler => sub {
 
-			my $target = $1;
-			my $source = peek_my(3);
+		my $target = shift;
+		my $source = peek_my(3);
 
-			$target =~ s/^\///;
-			$target =~ s/\/$//;
+		$target =~ s/^\///;
+		$target =~ s/\/$//;
 
-			my @t = split( /\//, $target );
+		my @t = split( /\//, $target );
 
-			if( scalar @t != 0) {
-				$lastSelection = $target;
-			}
-
-			my $result = find_lex_src($source,\@t);
-			my $data = {};
-
-			if($result) {
-
-				$data = expand_lex($result,'');
-			}
-
-			my $json = JSON->new()->allow_blessed()->allow_unknown();
-			my $info = $json->utf8->encode($data);
-			my $msg = $currentFile . ",/" . $target . "," . $info;
-			$fifo->write("jsonlexicals $msg");
+		if( scalar @t != 0) {
+			$lastSelection = $target;
 		}
-	},
-	{
-		# set breakpoint at file:line
-		regex => qr/^breakpoint ([^,]+),([0-9]+)$/s,
-		handler => sub {
 
-			my $file = $1;
-			my $line = $2;
-			setBreakpoint( $file, $line );
+		my $result = find_lex_src($source,\@t);
+		my $data = {};
+
+		if($result) {
+
+			$data = expand_lex($result,'');
 		}
+
+		my $json = JSON->new()->allow_blessed()->allow_unknown();
+		my $info = $json->utf8->encode($data);
+		my $msg = $currentFile . ",/" . $target . "," . $info;
+		$fifo->write( { cmd => "jsonlexicals", params => [ $currentFile, "/$target", $info] } );
 	},
-	{
+	breakpoint => sub {
+		my $file = shift;
+		my $line = shift;
+		setBreakpoint( $file, $line );
+	},
+	functionbreak => sub {
 		# lookup source position of fq function
-		regex => qr/^functionbreak (.*)/s,
-		handler => sub {
 
-			my $fun = $1;
-			my $file = find_module($fun);
-			my $line = getSubLine($fun);
-			$fifo->write("show $file,$line");
-			getBreakpointsForFile($file);
-		}
+		my $fun = shift;
+		my $file = find_module($fun);
+		my $line = getSubLine($fun);
+		$fifo->write( { cmd => "show", params => [ $file,$line] });
+		getBreakpointsForFile($file);
 	},
-	{
+	storebreakpoints => sub {
 		# dump breakpoints for display
-		regex => qr/^storebreakpoints$/s,
-		handler => sub {
 			dumpBreakpoints();
-		}
 	},
-	{
+	breakpoints => sub {
 		# dump breakpoints for display
-		regex => qr/^breakpoints$/s,
-		handler => sub {
 
-			my $data = "# set breakpoints:\n";
-			foreach my $bp ( keys %breakpoints ) {
-				$data .= $bp . "\n";
-			}
-			$data .= "\n# postponed breakpoints\n";
-			foreach my $key ( keys %postpone ) {
-				my $p = $postpone{$key};
-				foreach my $line (@$p) {
-					$data .= $key . ":" . $line . "\n";
-				}
-			}
-			$fifo->write( "breakpoints " . $data ."\n");
+		my $data = "# set breakpoints:\n";
+		foreach my $bp ( keys %breakpoints ) {
+			$data .= $bp . "\n";
 		}
+		$data .= "\n# postponed breakpoints\n";
+		foreach my $key ( keys %postpone ) {
+			my $p = $postpone{$key};
+			foreach my $line (@$p) {
+				$data .= $key . ":" . $line . "\n";
+			}
+		}
+		$fifo->write( { cmd => "breakpoints", params => [ $data ]} );
 	},
-	{
+	functions => sub {
 		# dump list of fq function names
-		regex => qr/^functions$/s,		
-		handler => sub {
 
-			my $subs = getSubs();
-			$fifo->write("subs $subs");
-		}
+		my $subs = getSubs();
+		$fifo->write( { cmd => "subs", params => [ $subs ]} );
 	},
-	{
+	fetch => sub {
 		# fetch line,file
-		regex => qr/^fetch ([^,]+),([0-9]+)$/s,		
-		handler => sub {
 
-			my $file = $1;
-			my $line = $2;
+		my $file = shift;
+		my $line = shift;
 
-			if($files{$file}) {
+		if($files{$file}) {
 
-				my $src = dbdumpsrc($files{$file});
-				$fifo->write("load $file,$line,$src");
-			}
+			my $src = dbdumpsrc($files{$file});
+			$fifo->write( { cmd => "load", params => [$file,$line,$src]} );
 		}
 	},
 );
@@ -1014,13 +969,15 @@ sub process_msg {
 
     my $msg = shift;
 
-    # print STDERR "MSG: $msg\n";
+	my $cmd    = $msg->{cmd};
+	my $params = $msg->{params};
+	
+	if($cmd && exists $msg_handlers{$cmd} ) {
 
-	foreach my $handler ( @msg_handlers) {
-		if ( $msg =~ $handler->{regex} ) {
-			$handler->{handler}->();
-			return;
-		}
+		$msg_handlers{$cmd}->( $params->@* )
+	}
+	else {
+		print STDERR "unknown $cmd. ".Dumper($msg);
 	}
 }
 
@@ -1070,7 +1027,7 @@ sub DB {
         }
 
         # move UI to current file:line
-        $fifo->write("file $abspath,$line");
+        $fifo->write( { cmd => "file", params => [$abspath,$line]} );
 		getBreakpointsForFile($abspath);
 
         # update the info pane call frame stack
@@ -1205,7 +1162,7 @@ END {
 
     dumpBreakpoints();
 
-    $fifo->write("quit");
+    $fifo->write({ cmd => "quit", params => []} );
 
     POSIX::_exit(0);
 }

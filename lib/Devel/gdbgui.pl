@@ -72,6 +72,7 @@ my $currentLine = 0;                  # the current line under debug
 my %files;    						  # files loaded, mapped to source
 my $pid   = 0;    					  # process ID of debugger process, to be signalled
 my $fifo;           				  # IPC with debugger backend
+my $rpc;
 my $uiDisabled = 1;					  # flag for UI disabled/enabled
 my $searchDirection = 'forward';      # search direction for text search
 my $selectedVar = "/";                # last expanded item in var inspection tree
@@ -109,28 +110,28 @@ sub dbint_handler {
 # run command - continue until next breakpoint
 sub onRun {
 
-    $fifo->write("continue");
+    $fifo->write( { cmd => "continue", params => []} );
     enableButtons(0);
 }
 
 # single step, recursing into functions
 sub onStep {
 
-    $fifo->write("step");
+    $fifo->write({ cmd => "step", params => []});
     enableButtons(0);
 }
 
 # single step, jumping over functions
 sub onOver {
 
-    $fifo->write("next");
+    $fifo->write( { cmd => "next", params => []} );
     enableButtons(0);
 }
 
 # step out of current function, continue stepping afterwards
 sub onOut {
 
-    $fifo->write("return");
+    $fifo->write({ cmd => "return", params => []} );
     enableButtons(0);
 }
 
@@ -158,7 +159,9 @@ sub onEval {
 
     my $e = $widgets{evalEntry}->get_text();
 
-    $fifo->write("eval $e");
+#    $fifo->write({ cmd => "eval", params => [$e] });
+
+	$fifo->rpc( "eval", $e );
 }
 
 
@@ -224,29 +227,85 @@ sub onMarker {
 		return;
 	}
 
-	$fifo->write("breakpoint $filename,$line");
+#	$fifo->write({ cmd => "breakpoint", params => [ $filename,$line]} );
+#	$fifo->rpc( "breakpoint", $filename, $line );
+	$rpc->breakpoint($filename,$line);
+}
+
+sub onToggleBreakpoint {
+
+	if($uiDisabled) {
+		return;
+	}
+
+	# if we are not looking at a source file, no breaktpoints
+	if( $widgets{sourceView}->get_buffer() eq $subsBuffer ||
+		$widgets{sourceView}->get_buffer() eq $infoBuffer ||
+		$widgets{sourceView}->get_buffer() eq $breakpointsBuffer ||
+		$widgets{sourceView}->get_buffer() eq $filesBuffer) 
+	{
+		return;
+	}
+
+    # cannot set break points in eval code
+    if ( $currentFile =~ /^\(eval/ ) {
+        return;
+    }
+
+	my $mark = $widgets{sourceView}->get_buffer()->get_insert();
+	my $iter = $widgets{sourceView}->get_buffer()->get_iter_at_mark($mark);
+	my $line = $iter->get_line()+1;
+
+#	my $iter = $widgets{sourceView}->get_buffer()->get_iter_at_line($line+1);
+
+	# get line of text, skip over some obviously non-breakable lines
+	my $text = getLine($iter,$sourceBuffers{$currentFile},$line);
+	if( !$text || $text eq "" || 
+	    $text =~ /^\s*((use)|(no)|(require)|(package)|#)/ ||
+		$text =~ /^\s+$/ ) 
+	{
+		return;
+	}
+
+#	$fifo->write({ cmd => "breakpoint", params => [ $filename,$line]} );
+#	$fifo->rpc( "breakpoint", $filename, $line );
+	$rpc->breakpoint($currentFile,$line);
+
+}
+
+sub onToggleRunning {
+
+	if($uiDisabled) {
+
+		onStop();
+	}
+	else {
+
+		onRun();
+	}
 }
 
 # user selected 'Show Lexicals' from file menu
 sub onLexicals {
 
-    $fifo->write("lexicals");
+ #   $fifo->write({ cmd => "lexicals", params => []} );
+	$fifo->rpc( "lexicals" );
 }
 
 # show breakpoints window menu handler
 sub onBreakpoints {
 
-    $fifo->write("breakpoints");
+    $fifo->write({ cmd => "breakpoints", params => []} );
 }
 
 sub onStoreBreakpoints {
-	$fifo->write("storebreakpoints");
+	$fifo->write({ cmd => "storebreakpoints", params => []} );
 }
 
 # show subroutines window menu handler
 sub onSubs {
 
-    $fifo->write("functions");
+    $fifo->write({ cmd => "functions", params => []});
 }
 
 # user clicks the call frame stack
@@ -273,7 +332,7 @@ sub onReload {
 
 	my $widget = shift;
 	my $event = shift;
-	$fifo->write("fetch $currentFile,$currentLine");
+	$fifo->write({ cmd => "fetch", params => [$currentFile,$currentLine] });
 }
 
 # mouse click on a line, if on breakpoints, files or subroutines view
@@ -295,7 +354,7 @@ sub onClick {
 
 	if($buf eq $subsBuffer) {
 
-		$fifo->write("functionbreak $text");
+		$fifo->write({ cmd => "functionbreak", params => [$text] });
 		return;
 	}
 	elsif($buf eq $breakpointsBuffer) {
@@ -347,7 +406,7 @@ sub onRowExpanded {
 
 			$gval = $model->get_value($iter,2); 
 			$model->remove($first);
-			$fifo->write("jsonlexicals $gval");
+			$fifo->write( { cmd => "jsonlexicals", params => [ $gval ] });
 		}
 	}
 }
@@ -485,6 +544,16 @@ sub onCancelSearch {
 	my $widget = shift;
 	my $event = shift;
 
+	my $img = $widget->get_property("image");
+
+	# if($img eq $widgets{imageCancel}) {
+
+	# 	$widget->set_property("image", $widgets{imageLookup});
+	# }
+	# else {
+	# 	$widget->set_property("image", $widgets{imageCancel});
+	# }
+
 	if($event->button->{type} eq 'button-press') {
 
 		# left click
@@ -511,6 +580,11 @@ sub onCancelSearch {
 			$dialog->show_all;
 		}
 	}
+}
+
+sub onFocusSearch {
+
+	$widgets{search}->grab_focus();
 }
 
 # search dialog events
@@ -579,195 +653,148 @@ sub onSearchRegexEnabled {
 # process messages from debugger
 ##################################################
 
-my @msg_handlers = (
-	{
-		# quit debugger
-		regex   => qr/^quit$/s,
-		handler => sub {
-
-			$quit = 2;
-		}
+my %msg_handlers = (
+	quit => sub {
+		$quit = 2;
 	},
-	{
-		# set current work directory
-		regex   => qr/^cwd (,*)/s,
-		handler => sub {
+	cwd => sub {
+		my $cwd = shift;
 
-			$widgets{statusBar}->set_text($1);
-			chdir $1;
-		}
+		$widgets{statusBar}->set_text($cwd);
+		chdir $cwd;
 	},
-	{
-		# process id (pid) of dubugger process
-		regex   => qr/^pid (.*)$/s,
-		handler => sub {
-
-			$pid = $1;
-		}
+	pid => sub {
+		$pid = shift;
 	},
-	{
-		# display file at line
-		regex   => qr/^file ([^,]+),([0-9]*)/s,
-		handler => sub {
+	file => sub {
 
-			my $file = $1;
-			my $line = $2;
+		my $file = shift;
+		my $line = shift;
 
-			$currentLine = $line;
-			$currentFile = $file;
+		$currentLine = $line;
+		$currentFile = $file;
 
-			scroll($file,$line);
-			enableButtons(1);		
-		}
+		scroll($file,$line);
+		enableButtons(1);		
 	},
-	{
+	show => sub {
 		# show file at line (like display above)
 		# but do not set current file
-		regex   => qr/^show ([^,]+),([0-9]*)/s,
-		handler => sub {
+		my $file = shift;
+		my $line = shift;
 
-			my $file = $1;
-			my $line = $2;
-
-			scroll($file,$line);
-			enableButtons(1);		
-		}
+		scroll($file,$line);
+		enableButtons(1);		
 	},
-	{
+	info => sub {
 		# display call stack info
-		regex   => qr/^info ([^,]+),([0-9]*),(.*)/s,
-		handler => sub {
 
-			my $file = $1;
-			my $line = $2;
-			my $info = $3;
+		my $file = shift;
+		my $line = shift;
+		my $info = shift;
 
-			$currentLine = $line;
-			$currentFile = $file;
+		$currentLine = $line;
+		$currentFile = $file;
 
-			$infoBuffer->set_text( $info, -1 );		
-			$fifo->write("jsonlexicals /");
-		}
+		$infoBuffer->set_text( $info, -1 );		
+		$fifo->write( { cmd => "jsonlexicals", params =>  ["/"] });
 	},
-	{
+	lexicals => sub {
 		# display lexicals
-		regex   => qr/^lexicals ([^,]+),([0-9]*),(.*)/s,
-		handler => sub {
 
-			my $file = $1;
-			my $line = $2;
-			my $info = $3;
+		my $file = shift;
+		my $line = shift;
+		my $info = shift;
 
-			$lexicalsBuffer->set_text( $info, -1 );
-			$widgets{sourceView}->set_buffer($lexicalsBuffer);
-			$widgets{mainWindow}->set_title("All current lexical variables:");
+		$lexicalsBuffer->set_text( $info, -1 );
+		$widgets{sourceView}->set_buffer($lexicalsBuffer);
+		$widgets{mainWindow}->set_title("All current lexical variables:");
+	},
+	jsonlexicals => sub {
+
+		my $file = shift;
+		my $target = shift;
+		my $info = decode_json(shift);
+
+		my $model = $widgets{lexicalTreeView}->get_model;
+		if($target eq '/') {
+			$model->clear;
+		}
+
+		my $root = undef;
+		my $result = find_root($target,$root);
+		if($result->{found}) {
+			my $iter = $result->{result};
+			my $path = '';
+			if($iter) {
+				$path = $model->get_value($iter,2);
+			}
+			populate_lexicals($info,$model,$iter,$path);
+		}
+		else {
+			populate_lexicals($info,$model,$root);
 		}
 	},
-	{
-		# display lexicals JSON
-		regex   => qr/^jsonlexicals ([^,]+),([^,]*),(.*)/s,
-		handler => sub {
-
-			my $file = $1;
-			my $target = $2;
-			my $info = decode_json($3);
-
-			my $model = $widgets{lexicalTreeView}->get_model;
-			if($target eq '/') {
-				$model->clear;
-			}
-
-			my $root = undef;
-			my $result = find_root($target,$root);
-			if($result->{found}) {
-				my $iter = $result->{result};
-				my $path = '';
-				if($iter) {
-					$path = $model->get_value($iter,2);
-				}
-				populate_lexicals($info,$model,$iter,$path);
-			}
-			else {
-				populate_lexicals($info,$model,$root);
-			}
-		}
-	},
-	{
+	breakpoints => sub {
 		# display breakpoints
-		regex   => qr/^breakpoints (.*)/s,
-		handler => sub {
+		my $info = shift;
 
-			my $info = $1;
-
-			$breakpointsBuffer->set_text( $info, -1 );
-			$widgets{sourceView}->set_buffer($breakpointsBuffer);
-			$widgets{mainWindow}->set_title("All breakpoints currently set:");
-		}
+		$breakpointsBuffer->set_text( $info, -1 );
+		$widgets{sourceView}->set_buffer($breakpointsBuffer);
+		$widgets{mainWindow}->set_title("All breakpoints currently set:");
 	},
-	{
+	setbreakpoints => sub {
 		# set breakpoints for file
-		regex   => qr/^setbreakpoints ([^,]+),(.*)/s,
-		handler => sub {
 
-			my $file  = $1;
-			my $lines = $2;
-			my @lines = split ',' , $lines;
+		my $file  = shift;
+		my $lines = shift;
+		my @lines = split ',' , $lines;
 
-			my $buf = $sourceBuffers{$file};
-			if(!$buf) {
-				return;
-			}
+		my $buf = $sourceBuffers{$file};
+		if(!$buf) {
+			return;
+		}
 
-			my $start = $buf->get_start_iter;
-			my $end   = $buf->get_end_iter;
+		my $start = $buf->get_start_iter;
+		my $end   = $buf->get_end_iter;
 
-			$buf->remove_source_marks($start,$end,"error");
+		$buf->remove_source_marks($start,$end,"error");
 
-			foreach my $line ( @lines ) {
+		foreach my $line ( @lines ) {
 
-				my $bpn = $file . ":" . $line;
-				my $iter = $buf->get_iter_at_line( $line - 1 );
-				$sourceBuffers{$file}->create_source_mark( $bpn, "error", $iter );
-			}
+			my $bpn = $file . ":" . $line;
+			my $iter = $buf->get_iter_at_line( $line - 1 );
+			$sourceBuffers{$file}->create_source_mark( $bpn, "error", $iter );
 		}
 	},
-	{
+	load => sub {
 		# load file,line,source
-		regex   => qr/^load ([^,]+),([0-9]+),(.*)/s,
-		handler => sub {
 
-			my $file = $1;
-			my $line = $2;
-			my $src  = $3;
-			$widgets{statusBar}->set_text("$file");
+		my $file = shift;
+		my $line = shift;
+		my $src  = shift;
+		$widgets{statusBar}->set_text("$file");
 
-			$files{$file} = $src;
-			# discuss whether this if is a good idea?
-			if ( $file !~ /^\/usr\// ) {
-				scroll($file,$line);
-			}
+		$files{$file} = $src;
+		# discuss whether this if is a good idea?
+		if ( $file !~ /^\/usr\// ) {
+			scroll($file,$line);
 		}
 	},
-	{
+	eval => sub {
 		# eval results passed as string
-		regex   => qr/^eval (.*)/s,
-		handler => sub {
 
-			my $evaled = $1;
-			$lexicalsBuffer->set_text( $evaled, -1 );
-			$widgets{sourceView}->set_buffer($lexicalsBuffer);
-		}
+		my $evaled = shift // '<undef>';
+		$lexicalsBuffer->set_text( $evaled, -1 );
+		$widgets{sourceView}->set_buffer($lexicalsBuffer);
 	},
-	{
+	subs => sub {
 		# all known subroutines for display
-		regex   => qr/^subs (.*)/s,
-		handler => sub {
 
-			my $subs = $1;
-			$subsBuffer->set_text( $subs, -1 );
-			$widgets{sourceView}->set_buffer($subsBuffer);
-			$widgets{mainWindow}->set_title("All subroutines loaded:");
-		}
+		my $subs = shift;
+		$subsBuffer->set_text( $subs, -1 );
+		$widgets{sourceView}->set_buffer($subsBuffer);
+		$widgets{mainWindow}->set_title("All subroutines loaded:");
 	},
 );
 
@@ -775,13 +802,14 @@ sub process_msg {
 
     my $msg = shift;
 
-	#print "MSG: ".substr($msg,0,60)."\n";
+	my $cmd = $msg->{cmd};
+	my $params = $msg ->{params} // [];
 
-	foreach my $handler ( @msg_handlers) {
-		if ( $msg =~ $handler->{regex} ) {
-			$handler->{handler}->();
-			return;
-		}
+	if ( $cmd && exists $msg_handlers{$cmd}) {
+		$msg_handlers{$cmd}->( $params->@* );
+	}
+	else {
+		print STDERR "unknown $cmd. ".Dumper($msg);
 	}
 }
 
@@ -861,7 +889,7 @@ sub loadBuffer {
 			# temp dummy content
 			$content = '<unknown>'; # 
 			# ask debugger to provide file
-			$fifo->write("fetch $file,$line");			
+			$fifo->write({ cmd => "fetch", params => [$file,$line] });			
 		}
 		$files{$file} = $content;
 	}
@@ -1194,7 +1222,8 @@ sub mapWidgets {
       buttonHome search searchDialog
 	  searchBackward searchForward
 	  lexicalTreeView LexicalTreeStore
-	  sourcesCombo
+	  sourcesCombo imageLookup imageCancel
+	  cancelSearch
     );
 
     foreach my $wn (@widgetNames) {
@@ -1210,6 +1239,15 @@ sub connect_signals {
 
     $obj->signal_connect( $signal => \&$handler );
 }
+
+my %accelerators = (
+	"<ctrl>Right" =>  \&onStep,
+	"<ctrl>Down" => \&onOver,
+	"<ctrl>Left" => \&onOut,
+	"<ctrl>f" => \&onFocusSearch,
+	"<ctrl>space" =>  \&onToggleRunning,
+	"<ctrl>BackSpace" => \&onToggleBreakpoint,
+);
 
 sub build_ui {
 
@@ -1330,6 +1368,17 @@ sub build_ui {
 	# enable button stop, just to be sure
     $widgets{buttonStop}->set_sensitive(1);
 
+	# keyboard shortcut accelerators
+	$widgets{accel} = Gtk3::AccelGroup->new();
+
+	foreach my $accel( keys %accelerators ) {
+
+		my ($key,$mod) = Gtk3::accelerator_parse($accel);
+		$widgets{accel}->connect( $key, $mod, [], $accelerators{$accel} );
+	}
+
+	$widgets{mainWindow}->add_accel_group($widgets{accel});
+
     # show the UI
     $widgets{mainWindow}->show_all();
 }
@@ -1352,15 +1401,18 @@ sub initialize {
 	my $fifo_dir = $ENV{"GDBG_FIFO_DIR"} || '/tmp/';
 
     $fifo = Devel::dipc->new();
-    $fifo->open_in("$fifo_dir/perl_debugger_fifo_out");
+    $fifo->open_in( "$fifo_dir/perl_debugger_fifo_out");
     $fifo->open_out("$fifo_dir/perl_debugger_fifo_in");
+
+	$rpc = Devel::dipc::RPC->new($fifo);
 
 #	$fifo->write("init");
 
 	if ( $ENV{"GDBG_NO_FORK"} ) {
 		onStop();		
-		$fifo->write("next");
+		$fifo->write({ cmd => "next", params => [] });
 	}
+
 
 	build_ui();
 }
@@ -1394,6 +1446,6 @@ if ( $quit == 1 )
 	if(!$ENV{"GDBG_KILL_CMD"}) {
     	kill 'INT', $pid;
 	}
-	$fifo->write("quit");
+	$fifo->write({ cmd => "quit", params => [] });
 }
 

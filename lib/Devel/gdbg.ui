@@ -59,7 +59,7 @@
   <object class="GtkImage" id="imageLookup">
     <property name="visible">True</property>
     <property name="can-focus">False</property>
-    <property name="icon-name">system-search</property>
+    <property name="icon-name">system-search-symbolic</property>
   </object>
 						  
 <object class="GtkDialog" id="searchDialog">  
@@ -505,7 +505,7 @@ stepping over any function calls.</property>
 						<property name="can-focus">True</property>
 						<property name="receives-default">True</property>
 						<property name="tooltip-text" translatable="yes">Cancel Search</property>
-						<property name="image">imageCancel</property>
+						<property name="image">imageLookup</property>
 						<signal name="button-press-event" handler="onCancelSearch" swapped="no"/>
 					</object>
 					<packing>
