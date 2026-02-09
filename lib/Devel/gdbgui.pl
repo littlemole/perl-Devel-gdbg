@@ -110,28 +110,28 @@ sub dbint_handler {
 # run command - continue until next breakpoint
 sub onRun {
 
-    $fifo->write( { cmd => "continue", params => []} );
+	$rpc->continue();
     enableButtons(0);
 }
 
 # single step, recursing into functions
 sub onStep {
 
-    $fifo->write({ cmd => "step", params => []});
+	$rpc->step();
     enableButtons(0);
 }
 
 # single step, jumping over functions
 sub onOver {
 
-    $fifo->write( { cmd => "next", params => []} );
+	$rpc->next();
     enableButtons(0);
 }
 
 # step out of current function, continue stepping afterwards
 sub onOut {
 
-    $fifo->write({ cmd => "return", params => []} );
+	$rpc->return();	
     enableButtons(0);
 }
 
@@ -158,9 +158,6 @@ sub onStop {
 sub onEval {
 
     my $e = $widgets{evalEntry}->get_text();
-
-#    $fifo->write({ cmd => "eval", params => [$e] });
-
 	$fifo->rpc( "eval", $e );
 }
 
@@ -227,8 +224,6 @@ sub onMarker {
 		return;
 	}
 
-#	$fifo->write({ cmd => "breakpoint", params => [ $filename,$line]} );
-#	$fifo->rpc( "breakpoint", $filename, $line );
 	$rpc->breakpoint($filename,$line);
 }
 
@@ -256,8 +251,6 @@ sub onToggleBreakpoint {
 	my $iter = $widgets{sourceView}->get_buffer()->get_iter_at_mark($mark);
 	my $line = $iter->get_line()+1;
 
-#	my $iter = $widgets{sourceView}->get_buffer()->get_iter_at_line($line+1);
-
 	# get line of text, skip over some obviously non-breakable lines
 	my $text = getLine($iter,$sourceBuffers{$currentFile},$line);
 	if( !$text || $text eq "" || 
@@ -267,10 +260,7 @@ sub onToggleBreakpoint {
 		return;
 	}
 
-#	$fifo->write({ cmd => "breakpoint", params => [ $filename,$line]} );
-#	$fifo->rpc( "breakpoint", $filename, $line );
 	$rpc->breakpoint($currentFile,$line);
-
 }
 
 sub onToggleRunning {
@@ -288,24 +278,24 @@ sub onToggleRunning {
 # user selected 'Show Lexicals' from file menu
 sub onLexicals {
 
- #   $fifo->write({ cmd => "lexicals", params => []} );
-	$fifo->rpc( "lexicals" );
+	$rpc->lexicals();
 }
 
 # show breakpoints window menu handler
 sub onBreakpoints {
 
-    $fifo->write({ cmd => "breakpoints", params => []} );
+	$rpc->breakpoints();
 }
 
 sub onStoreBreakpoints {
-	$fifo->write({ cmd => "storebreakpoints", params => []} );
+
+	$rpc->storebreakpoints();
 }
 
 # show subroutines window menu handler
 sub onSubs {
 
-    $fifo->write({ cmd => "functions", params => []});
+	$rpc->functions();	
 }
 
 # user clicks the call frame stack
@@ -332,7 +322,8 @@ sub onReload {
 
 	my $widget = shift;
 	my $event = shift;
-	$fifo->write({ cmd => "fetch", params => [$currentFile,$currentLine] });
+
+	$rpc->fetch($currentFile,$currentLine);	
 }
 
 # mouse click on a line, if on breakpoints, files or subroutines view
@@ -354,7 +345,7 @@ sub onClick {
 
 	if($buf eq $subsBuffer) {
 
-		$fifo->write({ cmd => "functionbreak", params => [$text] });
+		$rpc->functionbreak($text);
 		return;
 	}
 	elsif($buf eq $breakpointsBuffer) {
@@ -406,7 +397,7 @@ sub onRowExpanded {
 
 			$gval = $model->get_value($iter,2); 
 			$model->remove($first);
-			$fifo->write( { cmd => "jsonlexicals", params => [ $gval ] });
+			$rpc->jsonlexicals( $gval );
 		}
 	}
 }
@@ -545,14 +536,6 @@ sub onCancelSearch {
 	my $event = shift;
 
 	my $img = $widget->get_property("image");
-
-	# if($img eq $widgets{imageCancel}) {
-
-	# 	$widget->set_property("image", $widgets{imageLookup});
-	# }
-	# else {
-	# 	$widget->set_property("image", $widgets{imageCancel});
-	# }
 
 	if($event->button->{type} eq 'button-press') {
 
@@ -697,7 +680,7 @@ my %msg_handlers = (
 		$currentFile = $file;
 
 		$infoBuffer->set_text( $info, -1 );		
-		$fifo->write( { cmd => "jsonlexicals", params =>  ["/"] });
+		$rpc->jsonlexicals("/");
 	},
 	lexicals => sub {
 		# display lexicals
@@ -889,7 +872,8 @@ sub loadBuffer {
 			# temp dummy content
 			$content = '<unknown>'; # 
 			# ask debugger to provide file
-			$fifo->write({ cmd => "fetch", params => [$file,$line] });			
+			#$fifo->write({ cmd => "fetch", params => [$file,$line] });			
+			$rpc->fetch($file,$line);
 		}
 		$files{$file} = $content;
 	}
@@ -1410,7 +1394,8 @@ sub initialize {
 
 	if ( $ENV{"GDBG_NO_FORK"} ) {
 		onStop();		
-		$fifo->write({ cmd => "next", params => [] });
+		#$fifo->write({ cmd => "next", params => [] });
+		$rpc->next();
 	}
 
 
@@ -1446,6 +1431,7 @@ if ( $quit == 1 )
 	if(!$ENV{"GDBG_KILL_CMD"}) {
     	kill 'INT', $pid;
 	}
-	$fifo->write({ cmd => "quit", params => [] });
+	#$fifo->write({ cmd => "quit", params => [] });
+	$rpc->quit();
 }
 

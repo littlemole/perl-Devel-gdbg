@@ -96,8 +96,9 @@ my $fifo = Devel::dipc->new();
 $fifo->open_out("$fifo_dir/perl_debugger_fifo_out");
 $fifo->open_in("$fifo_dir/perl_debugger_fifo_in");
 
-$fifo->write({cmd => "cwd", params => [ getcwd() ]} );
-$fifo->write({cmd => "pid", params => [ $$ ]} );
+my $rpc = Devel::dipc::RPC->new($fifo);
+$rpc->cwd( getcwd() );
+$rpc->pid( $$ );
 
 restoreBreakpoints();
 
@@ -365,7 +366,8 @@ sub getBreakpointsForFile {
 
 	my $lines = join ',' , @lines;
 	$lines = $lines // '';
-	$fifo->write( { cmd => "setbreakpoints", params => [$file,$lines]}); 
+
+	$rpc->setbreakpoints($file,$lines);
 }
 
 # helper to load persited breakpoints from disk
@@ -442,7 +444,8 @@ sub updateInfo {
 
 	# update the UI
     my $abspath = abs_path(find_file($filename));
-    $fifo->write( { cmd => "info", params => [ $abspath,$line,$info ]});
+
+	$rpc->info( $abspath,$line,$info );
 }
 
 ##################################################
@@ -826,10 +829,10 @@ sub getSubs {
 my %msg_handlers = (
 	init => sub {
 		# send current working dir to UI
-		$fifo->write( { cmd => "cwd", params => [getcwd()]} );
+		$rpc->cwd( getcwd() );
 
 		# send PID of current process to UI
-		$fifo->write( { cmd => "pid", params => [ $$ ]} );
+		$rpc->pid( $$ );
 	},
 	quit => sub {
 
@@ -872,7 +875,7 @@ my %msg_handlers = (
 		if ($@) {
 			$r = $@;
 		}
-		$fifo->write( { cmd => "eval", params => [ $r ]} );
+		$rpc->eval( $r );
 	},
 	lexicals => sub {
 		# show lexicals
@@ -880,7 +883,7 @@ my %msg_handlers = (
 		my $info = Dumper($h);
 		$info =~ s/    / /gm;
 
-		$fifo->write( { cmd => "lexicals", params => [ $currentFile,$currentLine,$info ]} );
+		$rpc->lexicals( $currentFile,$currentLine,$info );
 	},
 	jsonlexicals => sub {
 		# show lexicals JSON
@@ -908,7 +911,8 @@ my %msg_handlers = (
 		my $json = JSON->new()->allow_blessed()->allow_unknown();
 		my $info = $json->utf8->encode($data);
 		my $msg = $currentFile . ",/" . $target . "," . $info;
-		$fifo->write( { cmd => "jsonlexicals", params => [ $currentFile, "/$target", $info] } );
+
+		$rpc->jsonlexicals( $currentFile, "/$target", $info );
 	},
 	breakpoint => sub {
 		my $file = shift;
@@ -921,12 +925,13 @@ my %msg_handlers = (
 		my $fun = shift;
 		my $file = find_module($fun);
 		my $line = getSubLine($fun);
-		$fifo->write( { cmd => "show", params => [ $file,$line] });
+
+		$rpc->show( $file, $line );
 		getBreakpointsForFile($file);
 	},
 	storebreakpoints => sub {
 		# dump breakpoints for display
-			dumpBreakpoints();
+		dumpBreakpoints();
 	},
 	breakpoints => sub {
 		# dump breakpoints for display
@@ -942,13 +947,13 @@ my %msg_handlers = (
 				$data .= $key . ":" . $line . "\n";
 			}
 		}
-		$fifo->write( { cmd => "breakpoints", params => [ $data ]} );
+		$rpc->breakpoints( $data );
 	},
 	functions => sub {
 		# dump list of fq function names
 
 		my $subs = getSubs();
-		$fifo->write( { cmd => "subs", params => [ $subs ]} );
+		$rpc->subs( $subs );
 	},
 	fetch => sub {
 		# fetch line,file
@@ -959,7 +964,7 @@ my %msg_handlers = (
 		if($files{$file}) {
 
 			my $src = dbdumpsrc($files{$file});
-			$fifo->write( { cmd => "load", params => [$file,$line,$src]} );
+			$rpc->load($file,$line,$src);
 		}
 	},
 );
@@ -1027,7 +1032,7 @@ sub DB {
         }
 
         # move UI to current file:line
-        $fifo->write( { cmd => "file", params => [$abspath,$line]} );
+		$rpc->file( $abspath, $line );
 		getBreakpointsForFile($abspath);
 
         # update the info pane call frame stack
@@ -1162,7 +1167,7 @@ END {
 
     dumpBreakpoints();
 
-    $fifo->write({ cmd => "quit", params => []} );
+	$rpc->quit();
 
     POSIX::_exit(0);
 }
