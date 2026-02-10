@@ -851,6 +851,8 @@ sub	setbreakpoints :RPC {
 	my $lines = shift;
 	my @lines = split ',' , $lines;
 
+print STDERR "BR: $file ".Dumper($lines);	
+
 	my $buf = $sourceBuffers{$file};
 	if(!$buf) {
 		return;
@@ -985,6 +987,8 @@ sub openFile {
     while ( $ctx->pending() ) {
         $ctx->iteration(0);
     }	
+
+	$rpc->getbreakpoints($filename);
 }
 
 # load a file into a new source buffer
@@ -1146,10 +1150,8 @@ sub scroll {
 # variable inspector support
 ##################################################
 
-#-------------------------------------------------
 # find a node '$target' in the var inspection tree
 # returning a Gtk TreeWidget iterator
-#-------------------------------------------------
 
 sub find_root {
 	my ($target,$root) = @_;
@@ -1557,9 +1559,6 @@ sub initialize {
 
 	# high level RPC wrapper on top of $fifo
 	$rpc = Devel::dipc::RPC->new($fifo);
-
-	# deprecated
-	# $fifo->write("init");
 
 	if ( $ENV{"GDBG_NO_FORK"} ) {
 

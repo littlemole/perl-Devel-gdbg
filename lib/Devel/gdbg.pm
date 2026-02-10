@@ -835,13 +835,7 @@ sub getSubs {
 ##################################################
 
 my %msg_handlers = (
-	init => sub {
-		# send current working dir to UI
-		$rpc->cwd( getcwd() );
 
-		# send PID of current process to UI
-		$rpc->pid( $$ );
-	},
 	quit => sub {
 
 		dumpBreakpoints();
@@ -941,6 +935,10 @@ my %msg_handlers = (
 		# dump breakpoints for display
 		dumpBreakpoints();
 	},
+	getbreakpoints => sub {
+		my $file = shift;
+		getBreakpointsForFile($file);
+	},
 	breakpoints => sub {
 		# dump breakpoints for display
 
@@ -1024,11 +1022,11 @@ sub DB {
         $DB::single = 1;    # set debugger to single step
     }
 
-	# process a bunch of msgs, if any
-	my @msgs = $fifo->read( \&process_msg );
-	foreach my $msg (@msgs) {
-		process_msg($msg);
-	}
+	# # process a bunch of msgs, if any
+	# my @msgs = $fifo->read( \&process_msg );
+	# foreach my $msg (@msgs) {
+	# 	process_msg($msg);
+	# }
 
     # if we are single stepping, update the UI
     if ($DB::single) {
@@ -1047,7 +1045,6 @@ sub DB {
 
         # move UI to current file:line
 		$rpc->file( $abspath, $line );
-		getBreakpointsForFile($abspath);
 
         # update the info pane call frame stack
         updateInfo( $package, $filename, $line );
