@@ -205,7 +205,7 @@
       </object>
     </child>
   </object>
-  <object class="GtkWindow" id="mainWindow">
+  <object class="GtkApplicationWindow" id="mainWindow">
     <property name="width-request">800</property>
     <property name="height-request">500</property>
     <property name="can-focus">False</property>
@@ -242,7 +242,11 @@
 								<property name="image">imageFile</property>
 								<property name="use-stock">False</property>
 								<property name="always-show-image">True</property>
+								<property name="action-name">win.onOpen</property>
+
+<!--								
 								<signal name="activate" handler="onOpen" swapped="no"/>
+							-->								
 							</object>
 							</child>
 							<child>
@@ -265,7 +269,11 @@
 								<property name="can-focus">False</property>
 								<property name="label" translatable="yes">Reload File</property>
 								<property name="use-underline">True</property>
+								<property name="action-name">win.onReload</property>
+
+<!--								
 								<signal name="activate" handler="onReload" swapped="no"/>
+							-->								
 							</object>
 							</child>
 							<child>
@@ -274,7 +282,11 @@
 								<property name="can-focus">False</property>
 								<property name="label" translatable="yes">Save Breakpoints</property>
 								<property name="use-underline">True</property>
+								<property name="action-name">win.onStoreBreakpoints</property>
+
+<!--								
 								<signal name="activate" handler="onStoreBreakpoints" swapped="no"/>
+							-->
 							</object>
 							</child>
 							<child>
@@ -283,7 +295,10 @@
 								<property name="can-focus">False</property>
 								<property name="label" translatable="yes">Goto Current Line</property>
 								<property name="use-underline">True</property>
+								<property name="action-name">win.onScroll</property>
+<!--
 								<signal name="activate" handler="onScroll" swapped="no"/>
+							-->								
 							</object>
 							</child>
 						  </object>
@@ -306,7 +321,10 @@
 								<property name="can-focus">False</property>
 								<property name="label" translatable="yes">Show Lexicals</property>
 								<property name="use-underline">True</property>
+								<property name="action-name">win.onLexicals</property>
+<!--
 								<signal name="activate" handler="onLexicals" swapped="no"/>
+							-->								
 							</object>
 							</child>
 							<child>
@@ -315,7 +333,10 @@
 								<property name="can-focus">False</property>
 								<property name="label" translatable="yes">Show Breakpoints</property>
 								<property name="use-underline">True</property>
+								<property name="action-name">win.onBreakpoints</property>
+<!--
 								<signal name="activate" handler="onBreakpoints" swapped="no"/>
+							-->								
 							</object>
 							</child>
 							<child>
@@ -324,7 +345,10 @@
 								<property name="can-focus">False</property>
 								<property name="label" translatable="yes">Show Subroutines</property>
 								<property name="use-underline">True</property>
+								<property name="action-name">win.onSubs</property>
+<!--								
 								<signal name="activate" handler="onSubs" swapped="no"/>
+							-->								
 							</object>
 							</child>
 							<child>
@@ -333,7 +357,10 @@
 								<property name="can-focus">False</property>
 								<property name="label" translatable="yes">Show Files</property>
 								<property name="use-underline">True</property>
+								<property name="action-name">win.onFiles</property>
+<!--								
 								<signal name="activate" handler="onFiles" swapped="no"/>
+							-->								
 							</object>
 							</child>
 						</object>
@@ -387,7 +414,10 @@
                 <property name="tooltip-text" translatable="yes">Continue to next breakpoint</property>
                 <property name="image">imageRun</property>
                 <property name="always-show-image">True</property>
+				<property name="action-name">win.onRun</property>
+<!--				
                 <signal name="clicked" handler="onRun" swapped="no"/>
+-->				
               </object>
               <packing>
                 <property name="expand">False</property>
@@ -405,7 +435,9 @@
                 <property name="tooltip-text" translatable="yes">Break into the Debugger.</property>
                 <property name="image">imageCancel2</property>
                 <property name="always-show-image">True</property>
-                <signal name="clicked" handler="onStop" swapped="no"/>
+				<property name="action-name">win.onStop</property>
+<!--                <signal name="clicked" handler="onStop" swapped="no"/>
+			  -->				
               </object>
               <packing>
                 <property name="expand">False</property>
@@ -424,7 +456,8 @@
 Will recursce into functions.</property>
                 <property name="image">imageStep</property>
                 <property name="always-show-image">True</property>
-                <signal name="clicked" handler="onStep" swapped="no"/>
+				<property name="action-name">win.onStep</property>
+<!--                <signal name="clicked" handler="onStep" swapped="no"/> -->
               </object>
               <packing>
                 <property name="expand">False</property>
@@ -443,7 +476,10 @@ Will recursce into functions.</property>
 stepping over any function calls.</property>
                 <property name="image">imageOver</property>
                 <property name="always-show-image">True</property>
+				<property name="action-name">win.onOver</property>
+<!--				
                 <signal name="clicked" handler="onOver" swapped="no"/>
+				-->				
               </object>
               <packing>
                 <property name="expand">False</property>
@@ -461,7 +497,10 @@ stepping over any function calls.</property>
                 <property name="tooltip-text" translatable="yes">Step out of current function.</property>
                 <property name="image">imageOut</property>
                 <property name="always-show-image">True</property>
+				<property name="action-name">win.onOut</property>
+<!--
                 <signal name="clicked" handler="onOut" swapped="no"/>
+			  -->				
               </object>
               <packing>
                 <property name="expand">False</property>
@@ -529,7 +568,10 @@ stepping over any function calls.</property>
                 <property name="receives-default">True</property>
                 <property name="tooltip-text" translatable="yes">Show lexical variables</property>
                 <property name="image">imageLexicals</property>
+				<property name="action-name">win.onLexicals</property>
+<!--
                 <signal name="clicked" handler="onLexicals" swapped="no"/>
+			  -->				
               </object>
               <packing>
                 <property name="expand">False</property>
@@ -544,7 +586,10 @@ stepping over any function calls.</property>
                 <property name="receives-default">True</property>
                 <property name="tooltip-text" translatable="yes">Go to current line being debugged.</property>
                 <property name="image">imageHome</property>
+				<property name="action-name">win.onScroll</property>
+<!--				
                 <signal name="clicked" handler="onScroll" swapped="no"/>
+			  -->				
               </object>
               <packing>
                 <property name="expand">False</property>

@@ -17,6 +17,7 @@ use File::Slurp  qw(slurp write_file);
 use File::Basename;
 use FindBin 1.51 qw( $RealBin );
 use Params::Util qw<_HASH _HASH0 _HASHLIKE _ARRAYLIKE>;
+use Sub::Util qw(subname);
 
 # IPC package share with debugger
 use Devel::dipc;
@@ -61,6 +62,44 @@ Glib::Object::Introspection->setup(
     package  => 'Gtk::Source'
 );
 
+package Widgets;
+
+sub new {
+	my $class   = shift;
+	my $widgets = shift;
+
+	my $self = {
+		widgets => $widgets
+	};
+
+	return bless $self, $class;
+}
+
+sub add {
+	my $self   = shift;
+	my $name   = shift;
+	my $widget = shift;
+
+	$self->{widgets}->{$name} = $widget; 
+}
+
+sub AUTOLOAD {
+
+	no strict;
+	my $self = shift;
+	my $widgets = $self->{widgets};
+
+	(my $method = $AUTOLOAD) =~ s{.*::}{};
+
+	use strict;
+	if(! exists $widgets->{$method} ) {
+		die ("Widget $method does not exist.");
+	}
+	return $widgets->{$method};
+}
+
+package gdbgui;
+
 ##################################################
 # Debugger UI globals
 ##################################################
@@ -69,11 +108,11 @@ my $quit        = 0;                  # stop the UI
 my $openFile    = "";                 # the currently shown file
 my $currentFile = "";                 # the current file of debugging
 my $currentLine = 0;                  # the current line under debug
+my $pid         = 0;    			  # process ID of debugger process, to be signalled
+my $uiDisabled  = 1;				  # flag for UI disabled/enabled
 my %files;    						  # files loaded, mapped to source
-my $pid   = 0;    					  # process ID of debugger process, to be signalled
 my $fifo;           				  # IPC with debugger backend
-my $rpc;
-my $uiDisabled = 1;					  # flag for UI disabled/enabled
+my $rpc;                              # RPC abstraction on top of $fifo
 my $searchDirection = 'forward';      # search direction for text search
 my $selectedVar = "/";                # last expanded item in var inspection tree
 my $uixml = $RealBin . "/gdbg.ui";    # path to glade xml ui definition
@@ -82,19 +121,56 @@ my $uixml = $RealBin . "/gdbg.ui";    # path to glade xml ui definition
 # global gtk widgets
 ##################################################
 
-my %widgets;           # UI widgets indexed by widget id
-my $langManager;       # gtk source language manager
-my $lang;              # gtk source view language (perl)
-my $scheme;            # gtk source view theme to use
-my $infoBuffer;        # the buffer displaying  call frame stack info
-my $lexicalsBuffer;    # gtk source buffer used to display lexicals vars
-my $subsBuffer;		   # buffer to display subs
-my $filesBuffer;	   # buffer to display files
-my $breakpointsBuffer; # buffer to display breakpoints
-my %sourceBuffers;     # hash of source code buffers indexed by filename
-my $ctx;               # the GTK main loop context
-my $searchSettings;    # search
-my $searchCtx;         # search
+my $widgets;           				  # UI widgets indexed by widget id
+my $scheme;            				  # gtk source view theme to use
+my %sourceBuffers;     				  # hash of source code buffers indexed by filename
+my $ctx;               				  # the GTK main loop context
+my $searchCtx;         				  # search ctx
+
+
+##################################################
+# actions and accelerators
+##################################################
+
+my %simpleActions;
+my %detailedActions;
+my @accels;
+
+##################################################
+# support for sub metadata attributes
+##################################################
+
+sub MODIFY_CODE_ATTRIBUTES {
+	my ($package,$coderef,@attrs) = @_;
+	my $fun = subname($coderef);
+
+	if ( $fun =~ /::([^:]+)$/ ) {
+		$fun = $1;
+	}
+
+	for my $attr ( @attrs ) {
+
+		if( $attr =~ /^Action$/ ) {
+
+			$simpleActions{$fun} = $coderef;
+		}
+
+		if( $attr =~ /^DetailedAction$/ ) {
+
+			$detailedActions{$fun} = $coderef;
+		}
+
+		if( $attr =~ /^Accel\(([^\)]+)\)$/ ) {
+
+			push @accels, {
+				key => $1,
+				handler => $coderef,
+			};
+		}
+	}
+
+	return ();
+}
 
 
 # INT signal handler
@@ -108,35 +184,35 @@ sub dbint_handler {
 ##################################################
 
 # run command - continue until next breakpoint
-sub onRun {
+sub onRun :Action {
 
 	$rpc->continue();
     enableButtons(0);
 }
 
 # single step, recursing into functions
-sub onStep {
+sub onStep :Action :Accel(<ctrl>Right) {
 
 	$rpc->step();
     enableButtons(0);
 }
 
 # single step, jumping over functions
-sub onOver {
+sub onOver :Action :Accel(<ctrl>Down) {
 
 	$rpc->next();
     enableButtons(0);
 }
 
 # step out of current function, continue stepping afterwards
-sub onOut {
+sub onOut :Action :Accel(<ctrl>Left) {
 
 	$rpc->return();	
     enableButtons(0);
 }
 
 # stop button pressed - interrupt the debugger
-sub onStop {
+sub onStop :Action {
 
     #	print "KILL $pid\n";
 	if(!$ENV{"GDBG_KILL_CMD"}) {
@@ -155,20 +231,20 @@ sub onStop {
 }
 
 # user entered return in eval entry
-sub onEval {
+sub onEval :Action {
 
-    my $e = $widgets{evalEntry}->get_text();
+    my $e = $widgets->evalEntry->get_text();
 	$fifo->rpc( "eval", $e );
 }
 
 
 # user selected open-file from menu
-sub onOpen {
+sub onOpen :Action {
 
     # show open file dialog
     my $dlg = Gtk3::FileChooserNative->new( 
 		"Open File", 
-		$widgets{mainWindow}, 
+		$widgets->mainWindow, 
 		'open',
         "OK", 
 		"Cancel" 
@@ -183,7 +259,7 @@ sub onOpen {
 }
 
 # user selected 'Goto current line' from File Menu
-sub onScroll {
+sub onScroll :Action {
 
     scroll($currentFile,$currentLine);
 }
@@ -197,11 +273,13 @@ sub onMarker {
 		return;
 	}
 
+	my $buf = $widgets->sourceView->get_buffer();
+
 	# if we are not looking at a source file, no breaktpoints
-	if( $widgets{sourceView}->get_buffer() eq $subsBuffer ||
-		$widgets{sourceView}->get_buffer() eq $infoBuffer ||
-		$widgets{sourceView}->get_buffer() eq $breakpointsBuffer ||
-		$widgets{sourceView}->get_buffer() eq $filesBuffer) 
+	if( $buf == $widgets->subsBuffer ||
+		$buf == $widgets->infoBuffer ||
+		$buf == $widgets->breakpointsBuffer ||
+		$buf == $widgets->filesBuffer) 
 	{
 		return;
 	}
@@ -227,17 +305,20 @@ sub onMarker {
 	$rpc->breakpoint($filename,$line);
 }
 
-sub onToggleBreakpoint {
+
+sub onToggleBreakpoint :Accel(<ctrl>BackSpace) {
 
 	if($uiDisabled) {
 		return;
 	}
 
+	my $buf = $widgets->sourceView->get_buffer();
+
 	# if we are not looking at a source file, no breaktpoints
-	if( $widgets{sourceView}->get_buffer() eq $subsBuffer ||
-		$widgets{sourceView}->get_buffer() eq $infoBuffer ||
-		$widgets{sourceView}->get_buffer() eq $breakpointsBuffer ||
-		$widgets{sourceView}->get_buffer() eq $filesBuffer) 
+	if( $buf == $widgets->subsBuffer ||
+		$buf == $widgets->infoBuffer ||
+		$buf == $widgets->breakpointsBuffer ||
+		$buf == $widgets->filesBuffer) 
 	{
 		return;
 	}
@@ -247,8 +328,8 @@ sub onToggleBreakpoint {
         return;
     }
 
-	my $mark = $widgets{sourceView}->get_buffer()->get_insert();
-	my $iter = $widgets{sourceView}->get_buffer()->get_iter_at_mark($mark);
+	my $mark = $widgets->sourceView->get_buffer()->get_insert();
+	my $iter = $widgets->sourceView->get_buffer()->get_iter_at_mark($mark);
 	my $line = $iter->get_line()+1;
 
 	# get line of text, skip over some obviously non-breakable lines
@@ -263,7 +344,7 @@ sub onToggleBreakpoint {
 	$rpc->breakpoint($currentFile,$line);
 }
 
-sub onToggleRunning {
+sub onToggleRunning :Accel(<ctrl>space) {
 
 	if($uiDisabled) {
 
@@ -276,24 +357,24 @@ sub onToggleRunning {
 }
 
 # user selected 'Show Lexicals' from file menu
-sub onLexicals {
+sub onLexicals :Action {
 
 	$rpc->lexicals();
 }
 
 # show breakpoints window menu handler
-sub onBreakpoints {
+sub onBreakpoints :Action {
 
 	$rpc->breakpoints();
 }
 
-sub onStoreBreakpoints {
+sub onStoreBreakpoints :Action {
 
 	$rpc->storebreakpoints();
 }
 
 # show subroutines window menu handler
-sub onSubs {
+sub onSubs :Action {
 
 	$rpc->functions();	
 }
@@ -318,7 +399,7 @@ sub onInfoPaneClick {
 }
 
 # reload the current, active file, if any
-sub onReload {
+sub onReload :Action {
 
 	my $widget = shift;
 	my $event = shift;
@@ -341,14 +422,14 @@ sub onClick {
 		return; 
 	}
 
-	my $buf = $widgets{sourceView}->get_buffer();
+	my $buf = $widgets->sourceView->get_buffer();
 
-	if($buf eq $subsBuffer) {
+	if($buf == $widgets->subsBuffer) {
 
 		$rpc->functionbreak($text);
 		return;
 	}
-	elsif($buf eq $breakpointsBuffer) {
+	elsif($buf == $widgets->breakpointsBuffer) {
 
 		if ( $text =~ /^#/) { return; }
 		if ($text =~ /([^:]+):([0-9]+)/ ) {
@@ -358,7 +439,7 @@ sub onClick {
 		}
 		return;
 	}
-	elsif($buf eq $filesBuffer) {
+	elsif($buf == $widgets->filesBuffer) {
 
 		openFile($text,1);
 		return;
@@ -366,16 +447,16 @@ sub onClick {
 }
 
 # show files view
-sub onFiles {
+sub onFiles :Action {
 
 	my @files = keys %files;
 	my @sorted = sort(@files);
 	my $text = join("\n", @sorted);
 
-	$filesBuffer->set_text($text,-1);
+	$widgets->filesBuffer->set_text($text,-1);
 
-	$widgets{sourceView}->set_buffer($filesBuffer);
-	$widgets{mainWindow}->set_title("Files loaded by the debugger:");
+	$widgets->sourceView->set_buffer($widgets->filesBuffer);
+	$widgets->mainWindow->set_title("Files loaded by the debugger:");
 }
 
 # lazily load var inspection tree content
@@ -384,7 +465,7 @@ sub onRowExpanded {
 	my $widget = shift;
 	my $iter   = shift;
 
-	my $model = $widgets{lexicalTreeView}->get_model();
+	my $model = $widgets->lexicalTreeView->get_model();
 	my $gval = $model->get_value($iter,2); 
 	$selectedVar = $gval;
 
@@ -415,11 +496,11 @@ sub onTheme {
         $sourceBuffers{$key}->set_style_scheme($scheme);
     }
 	
-	$infoBuffer->set_style_scheme($scheme);;        
-	$lexicalsBuffer->set_style_scheme($scheme);;    
-	$subsBuffer->set_style_scheme($scheme);;		
-	$filesBuffer->set_style_scheme($scheme);;	   
-	$breakpointsBuffer->set_style_scheme($scheme);; 
+	$widgets->infoBuffer->set_style_scheme($scheme);;        
+	$widgets->lexicalsBuffer->set_style_scheme($scheme);;    
+	$widgets->subsBuffer->set_style_scheme($scheme);;		
+	$widgets->filesBuffer->set_style_scheme($scheme);;	   
+	$widgets->breakpointsBuffer->set_style_scheme($scheme);; 
 }
 
 # user selects source from Sources Menu
@@ -429,28 +510,27 @@ sub onWindow {
 
     $openFile = $label;
 
-    $widgets{sourceView}->set_buffer( $sourceBuffers{$openFile} );
-    $widgets{mainWindow}->set_title(basename($openFile));
-	$widgets{statusBar}->set_text(basename($openFile));
-	$widgets{statusBar}->set_tooltip_text($openFile);
+    $widgets->sourceView->set_buffer( $sourceBuffers{$openFile} );
+    $widgets->mainWindow->set_title(basename($openFile));
+	$widgets->statusBar->set_text(basename($openFile));
+	$widgets->statusBar->set_tooltip_text($openFile);
 
-	$widgets{sourcesCombo}->set_active_id($openFile);
+	$widgets->sourcesCombo->set_active_id($openFile);
 }
 
 # user selects source from combo box
 sub onFileChoose {
 
-	my $file = $widgets{sourcesCombo}->get_active_text();
+	my $file = $widgets->sourcesCombo->get_active_text();
 
     $openFile = $file;
 
-    $widgets{sourceView}->set_buffer( $sourceBuffers{$openFile} );
-    $widgets{mainWindow}->set_title(basename($openFile));
-	$widgets{statusBar}->set_text(basename($openFile));
-	$widgets{statusBar}->set_tooltip_text($openFile);
+    $widgets->sourceView->set_buffer( $sourceBuffers{$openFile} );
+    $widgets->mainWindow->set_title(basename($openFile));
+	$widgets->statusBar->set_text(basename($openFile));
+	$widgets->statusBar->set_tooltip_text($openFile);
 
 }
-
 
 # user closes main window
 sub onDestroy {
@@ -489,16 +569,16 @@ sub onSearch {
 
 	my $query = $widget->get_text();
 
-	$searchSettings->set_search_text($query);
+	$widgets->searchSettings->set_search_text($query);
 
 	$searchCtx = Gtk::Source::SearchContext->new(
-		$widgets{sourceView}->get_buffer(),
-		$searchSettings,
+		$widgets->sourceView->get_buffer(),
+		$widgets->searchSettings,
 	);
 
 	$searchCtx->set_highlight(1);
 
-	my ($hasSelection,$startIter,$endIter) = $widgets{sourceView}->get_buffer()->get_selection_bounds();
+	my ($hasSelection,$startIter,$endIter) = $widgets->sourceView->get_buffer()->get_selection_bounds();
 	my ($match,$matchStart, $matchEnd) ;
 
 	my $direction = $isShift 
@@ -521,10 +601,10 @@ sub onSearch {
 
 	if($match) {
 
-		my $buf = $widgets{sourceView}->get_buffer();
+		my $buf = $widgets->sourceView->get_buffer();
 		$buf->select_range($matchStart,$matchEnd);
 
-		$widgets{sourceView}->scroll_to_iter( $matchStart, 0, 1, 0.5, 0.5 );		
+		$widgets->sourceView->scroll_to_iter( $matchStart, 0, 1, 0.5, 0.5 );		
 	}
 
 	return 1;
@@ -547,27 +627,27 @@ sub onCancelSearch {
 				$searchCtx->set_highlight(0);
 			}
 
-			$widgets{search}->set_text("");
+			$widgets->search->set_text("");
 		}
 		# right click
 		if($event->button->{button} == 3) {
 
-			my $dialog = $widgets{searchDialog};
+			my $dialog = $widgets->searchDialog;
 
 			my $active = $searchDirection eq 'forward' ? 1 : 0;
-			$widgets{searchForward}->set_active($active);
-			$widgets{searchBackward}->set_active(!$active);
+			$widgets->searchForward->set_active($active);
+			$widgets->searchBackward->set_active(!$active);
 
-			$dialog->set_transient_for($widgets{mainWindow});
+			$dialog->set_transient_for($widgets->mainWindow);
 			$dialog->set_modal(1);
 			$dialog->show_all;
 		}
 	}
 }
 
-sub onFocusSearch {
+sub onFocusSearch :Accel(<ctrl>f) {
 
-	$widgets{search}->grab_focus();
+	$widgets->search->grab_focus();
 }
 
 # search dialog events
@@ -610,7 +690,7 @@ sub onSearchSensitive {
 	my $event = shift;
 
 	my $value = $widget->get_active;
-	$searchSettings->set_case_sensitive($value);
+	$widgets->searchSettings->set_case_sensitive($value);
 }
 
 sub onSearchWordBoundaries {
@@ -619,7 +699,7 @@ sub onSearchWordBoundaries {
 	my $event = shift;
 
 	my $value = $widget->get_active;
-	$searchSettings->set_at_word_boundaries ($value);
+	$widgets->searchSettings->set_at_word_boundaries ($value);
 }
 
 sub onSearchRegexEnabled {
@@ -628,7 +708,7 @@ sub onSearchRegexEnabled {
 	my $event = shift;
 
 	my $value = $widget->get_active;
-	$searchSettings->set_regex_enabled ($value);
+	$widgets->searchSettings->set_regex_enabled ($value);
 }
 
 
@@ -643,7 +723,7 @@ my %msg_handlers = (
 	cwd => sub {
 		my $cwd = shift;
 
-		$widgets{statusBar}->set_text($cwd);
+		$widgets->statusBar->set_text($cwd);
 		chdir $cwd;
 	},
 	pid => sub {
@@ -679,7 +759,7 @@ my %msg_handlers = (
 		$currentLine = $line;
 		$currentFile = $file;
 
-		$infoBuffer->set_text( $info, -1 );		
+		$widgets->infoBuffer->set_text( $info, -1 );		
 		$rpc->jsonlexicals("/");
 	},
 	lexicals => sub {
@@ -689,9 +769,9 @@ my %msg_handlers = (
 		my $line = shift;
 		my $info = shift;
 
-		$lexicalsBuffer->set_text( $info, -1 );
-		$widgets{sourceView}->set_buffer($lexicalsBuffer);
-		$widgets{mainWindow}->set_title("All current lexical variables:");
+		$widgets->lexicalsBuffer->set_text( $info, -1 );
+		$widgets->sourceView->set_buffer($widgets->lexicalsBuffer);
+		$widgets->mainWindow->set_title("All current lexical variables:");
 	},
 	jsonlexicals => sub {
 
@@ -699,7 +779,7 @@ my %msg_handlers = (
 		my $target = shift;
 		my $info = decode_json(shift);
 
-		my $model = $widgets{lexicalTreeView}->get_model;
+		my $model = $widgets->lexicalTreeView->get_model;
 		if($target eq '/') {
 			$model->clear;
 		}
@@ -722,9 +802,9 @@ my %msg_handlers = (
 		# display breakpoints
 		my $info = shift;
 
-		$breakpointsBuffer->set_text( $info, -1 );
-		$widgets{sourceView}->set_buffer($breakpointsBuffer);
-		$widgets{mainWindow}->set_title("All breakpoints currently set:");
+		$widgets->breakpointsBuffer->set_text( $info, -1 );
+		$widgets->sourceView->set_buffer($widgets->breakpointsBuffer);
+		$widgets->mainWindow->set_title("All breakpoints currently set:");
 	},
 	setbreakpoints => sub {
 		# set breakpoints for file
@@ -756,7 +836,7 @@ my %msg_handlers = (
 		my $file = shift;
 		my $line = shift;
 		my $src  = shift;
-		$widgets{statusBar}->set_text("$file");
+		$widgets->statusBar->set_text("$file");
 
 		$files{$file} = $src;
 		# discuss whether this if is a good idea?
@@ -768,16 +848,16 @@ my %msg_handlers = (
 		# eval results passed as string
 
 		my $evaled = shift // '<undef>';
-		$lexicalsBuffer->set_text( $evaled, -1 );
-		$widgets{sourceView}->set_buffer($lexicalsBuffer);
+		$widgets->lexicalsBuffer->set_text( $evaled, -1 );
+		$widgets->sourceView->set_buffer($widgets->lexicalsBuffer);
 	},
 	subs => sub {
 		# all known subroutines for display
 
 		my $subs = shift;
-		$subsBuffer->set_text( $subs, -1 );
-		$widgets{sourceView}->set_buffer($subsBuffer);
-		$widgets{mainWindow}->set_title("All subroutines loaded:");
+		$widgets->subsBuffer->set_text( $subs, -1 );
+		$widgets->sourceView->set_buffer($widgets->subsBuffer);
+		$widgets->mainWindow->set_title("All subroutines loaded:");
 	},
 );
 
@@ -806,9 +886,9 @@ sub openFile {
     my $filename = shift;
     my $line     = shift;
 
-    $widgets{mainWindow}->set_title( basename($filename) . ":" . $line );	
-	$widgets{statusBar}->set_text(basename($filename).":".$line);
-	$widgets{statusBar}->set_tooltip_text($filename);
+    $widgets->mainWindow->set_title( basename($filename) . ":" . $line );	
+	$widgets->statusBar->set_text(basename($filename).":".$line);
+	$widgets->statusBar->set_tooltip_text($filename);
 
     while ( $ctx->pending() ) {
         $ctx->iteration(0);
@@ -820,7 +900,7 @@ sub openFile {
     if ( $sourceBuffers{$filename} ) {
 
         # file already exists!
-        $widgets{sourceView}->set_buffer( $sourceBuffers{$filename} );
+        $widgets->sourceView->set_buffer( $sourceBuffers{$filename} );
 
 		# if we have the source
 		if($files{$filename}) {
@@ -832,7 +912,7 @@ sub openFile {
 				$sourceBuffers{$filename}->set_text( $files{$filename}, -1 );
 			}
 		}
-		$widgets{sourcesCombo}->set_active_id($filename);
+		$widgets->sourcesCombo->set_active_id($filename);
         return;
     }
 
@@ -844,8 +924,8 @@ sub openFile {
     }
 
     # set the new buffer as current buffer for display
-    $widgets{sourceView}->set_buffer($buf);
-	$widgets{sourcesCombo}->set_active_id($filename);
+    $widgets->sourceView->set_buffer($buf);
+	$widgets->sourcesCombo->set_active_id($filename);
 
     while ( $ctx->pending() ) {
         $ctx->iteration(0);
@@ -880,7 +960,7 @@ sub loadBuffer {
 	
 	# create GTK source buffer with content
 	my $buf = Gtk::Source::Buffer->new();
-	$buf->set_language($lang);
+	$buf->set_language($widgets->lang);
 	$buf->set_style_scheme($scheme);
 	if ($content) {
 		$buf->set_text( $content, -1 );
@@ -891,12 +971,12 @@ sub loadBuffer {
 	my $item = Gtk3::MenuItem->new_with_label($file);
 	$item->signal_connect( 'activate' => \&onWindow );
 
-	$widgets{windowMenu}->add($item);
-	$widgets{windowMenu}->show_all();
+	$widgets->windowMenu->add($item);
+	$widgets->windowMenu->show_all();
 
 	# also add to combo box
-	$widgets{sourcesCombo}->append($file,$file);
-	$widgets{sourcesCombo}->set_active_id($file);
+	$widgets->sourcesCombo->append($file,$file);
+	$widgets->sourcesCombo->set_active_id($file);
 
 	return $buf;
 }
@@ -964,21 +1044,21 @@ sub enableButtons {
 
 	$uiDisabled = $state ? 0 : 1;
 
-    $widgets{buttonRun}->set_sensitive($state);
-    $widgets{buttonStep}->set_sensitive($state);
-    $widgets{buttonOver}->set_sensitive($state);
-    $widgets{buttonOut}->set_sensitive($state);
-    $widgets{buttonLexicals}->set_sensitive($state);
-    $widgets{buttonHome}->set_sensitive($state);
-    $widgets{evalEntry}->set_sensitive($state);
-    $widgets{lexicalsMenu}->set_sensitive($state);
-    $widgets{breakpointsMenu}->set_sensitive($state);
-    $widgets{openFileMenu}->set_sensitive($state);
-    $widgets{showSubsMenu}->set_sensitive($state);
-    $widgets{showFilesMenu}->set_sensitive($state);
-    $widgets{lexicalTreeView}->set_sensitive($state);
+    $widgets->buttonRun->set_sensitive($state);
+    $widgets->buttonStep->set_sensitive($state);
+    $widgets->buttonOver->set_sensitive($state);
+    $widgets->buttonOut->set_sensitive($state);
+    $widgets->buttonLexicals->set_sensitive($state);
+    $widgets->buttonHome->set_sensitive($state);
+    $widgets->evalEntry->set_sensitive($state);
+    $widgets->lexicalsMenu->set_sensitive($state);
+    $widgets->breakpointsMenu->set_sensitive($state);
+    $widgets->openFileMenu->set_sensitive($state);
+    $widgets->showSubsMenu->set_sensitive($state);
+    $widgets->showFilesMenu->set_sensitive($state);
+    $widgets->lexicalTreeView->set_sensitive($state);
 
-    $widgets{buttonStop}->set_sensitive( $state ? 0 : 1 );
+    $widgets->buttonStop->set_sensitive( $state ? 0 : 1 );
 }
 
 # update the info with current call frame stack
@@ -986,9 +1066,9 @@ sub updateInfo {
 
     my ( $filename, $line, $info ) = @_;
 
-    $widgets{mainWindow}->set_title( $filename . ":" . $line );
+    $widgets->mainWindow->set_title( $filename . ":" . $line );
 
-    $infoBuffer->set_text( $info, -1 );
+    $widgets->infoBuffer->set_text( $info, -1 );
 }
 
 # scroll to currently debugged line
@@ -1004,7 +1084,7 @@ sub scroll {
     }
 
     my $iter = $sourceBuffers{$file}->get_iter_at_line( $line - 1 );
-    $widgets{sourceView}->scroll_to_iter( $iter, 0, 1, 0, 0.5 );
+    $widgets->sourceView->scroll_to_iter( $iter, 0, 1, 0, 0.5 );
     while ( $ctx->pending() ) {
         $ctx->iteration(0);
     }
@@ -1030,7 +1110,7 @@ sub find_root {
 		};
 	}
 
-	my $model = $widgets{lexicalTreeView}->get_model;
+	my $model = $widgets->lexicalTreeView->get_model;
 
 	my $iter = $model->iter_children($root);
 	while( $iter) {
@@ -1127,8 +1207,8 @@ sub populate_item {
 			if($iter) {
 				my $p = $model->get_path($iter);
 				if($p) {
-					$widgets{lexicalTreeView}->expand_to_path($p);
-					$widgets{lexicalTreeView}->scroll_to_cell($p,undef,0,0,0);					
+					$widgets->lexicalTreeView->expand_to_path($p);
+					$widgets->lexicalTreeView->scroll_to_cell($p,undef,0,0,0);					
 				}
 			}
 		}
@@ -1177,8 +1257,8 @@ sub populate_lexicals {
 		if($iter) {
 			my $p = $model->get_path($iter);
 			if($p) {
-				$widgets{lexicalTreeView}->expand_to_path($p);
-				$widgets{lexicalTreeView}->scroll_to_cell($p,undef,0,0,0);	
+				$widgets->lexicalTreeView->expand_to_path($p);
+				$widgets->lexicalTreeView->scroll_to_cell($p,undef,0,0,0);	
 			}
 		}
 	}
@@ -1193,28 +1273,38 @@ sub mapWidgets {
 
     my $builder = shift;
 
-    my @widgetNames = qw(
-      mainWindow statusBar
-      windowMenu themesMenu
-      lexicalsMenu breakpointsMenu
-	  showSubsMenu showFilesMenu
-      openFileMenu evalEntry
-      sourceView infoPane
-      openFile scrollMenu lexicalsMenu
-      buttonRun buttonStep buttonOver
-      buttonOut buttonStop buttonLexicals
-      buttonHome search searchDialog
-	  searchBackward searchForward
-	  lexicalTreeView LexicalTreeStore
-	  sourcesCombo imageLookup imageCancel
-	  cancelSearch
-    );
+	my %widgets;
+	my $list = $builder->get_objects();
+	for my $widget ( @$list ) {
 
-    foreach my $wn (@widgetNames) {
+		my $id = Gtk3::Buildable::get_name($widget);
+		$widgets{$id} = $widget;
+	}
 
-        my $widget = $builder->get_object($wn);
-        $widgets{$wn} = $widget;
-    }
+	$widgets = Widgets->new( \%widgets );
+
+    # my @widgetNames = qw(
+    #   mainWindow statusBar
+    #   windowMenu themesMenu
+    #   lexicalsMenu breakpointsMenu
+	#   showSubsMenu showFilesMenu
+    #   openFileMenu evalEntry
+    #   sourceView infoPane
+    #   openFile scrollMenu lexicalsMenu
+    #   buttonRun buttonStep buttonOver
+    #   buttonOut buttonStop buttonLexicals
+    #   buttonHome search searchDialog
+	#   searchBackward searchForward
+	#   lexicalTreeView LexicalTreeStore
+	#   sourcesCombo imageLookup imageCancel
+	#   cancelSearch
+    # );
+
+    # foreach my $wn (@widgetNames) {
+
+    #     my $widget = $builder->get_object($wn);
+    #     $widgets{$wn} = $widget;
+    # }
 }
 
 sub connect_signals {
@@ -1224,20 +1314,76 @@ sub connect_signals {
     $obj->signal_connect( $signal => \&$handler );
 }
 
-my %accelerators = (
-	"<ctrl>Right" =>  \&onStep,
-	"<ctrl>Down" => \&onOver,
-	"<ctrl>Left" => \&onOut,
-	"<ctrl>f" => \&onFocusSearch,
-	"<ctrl>space" =>  \&onToggleRunning,
-	"<ctrl>BackSpace" => \&onToggleBreakpoint,
-);
+# my %accelerators = (
+# 	"<ctrl>Right" =>  \&onStep,
+# 	"<ctrl>Down" => \&onOver,
+# 	"<ctrl>Left" => \&onOut,
+# 	"<ctrl>f" => \&onFocusSearch,
+# #	"<ctrl>space" =>  \&onToggleRunning,
+# 	"<ctrl>BackSpace" => \&onToggleBreakpoint,
+# );
+
+
+sub add_actions {
+
+  	my $mainWindow = shift;
+
+#	my $actionGroup = Gtk3::ActionGroup->new("actions");
+
+	for my $key ( keys %simpleActions ) {
+		print STDERR "Simple Action: $key\n";
+
+		my $handler = $simpleActions{$key};
+
+		my $action = Glib::IO::SimpleAction->new($key);
+		$action->signal_connect("activate", $handler);
+
+		$mainWindow->add_action($action);    
+	}
+
+	for my $key ( keys %detailedActions ) {
+		print STDERR "Detailed Action: $key\n";
+
+		my $handler = $detailedActions{$key};
+
+		my $gvt = Glib::VariantType->new("s");
+		my $gv  = Glib::Variant->new_string("");
+
+		my $action = Glib::IO::SimpleAction->new_stateful($key,$gvt,$gv);
+		$action->signal_connect("activate", $handler);
+
+		$mainWindow->add_action($action);    
+	}
+
+#	$widgets{actionGroup} = $actionGroup;
+}
+
+sub add_accels {
+
+	for my $accel ( @accels ) {
+
+		my $key     = $accel->{key};
+		my $handler = $accel->{handler};
+
+		print STDERR "Accel: $key\n";
+
+		my ($key,$mod) = Gtk3::accelerator_parse($key);
+		$widgets->accel->connect( $key, $mod, [], $handler );
+	}
+}
+
 
 sub build_ui {
 
 	# load widgets from xml
     my $builder = Gtk3::Builder->new();
     $builder->add_from_file($uixml) or die 'file not found';
+
+	my $list = $builder->get_objects();
+	for my $w ( @$list ) {
+		print STDERR  Dumper($w);
+		print STDERR Gtk3::Buildable::get_name($w)."\n";
+	}
 
 	# get references to widgets
     mapWidgets($builder);
@@ -1246,18 +1392,21 @@ sub build_ui {
     $builder->connect_signals_full( \&connect_signals, 0 );
 
 	# Perl syntax highlighting support
-    $langManager = Gtk::Source::LanguageManager->new();
-    $lang        = $langManager->get_language("perl");
+    my $langManager = Gtk::Source::LanguageManager->new();
+    my $lang        = $langManager->get_language("perl");
+
+	$widgets->add( langManager => $langManager );
+	$widgets->add( lang        => $lang );
 
 	# prepare support for breakpoint markers
     my $attrs = Gtk::Source::MarkAttributes->new();
     $attrs->set_icon_name("media-record");
 
 	# setup main sourceView attributes
-    $widgets{sourceView}->set_show_line_marks(1);
-    $widgets{sourceView}->set_editable(0);
-    $widgets{sourceView}->set_wrap_mode('none');
-    $widgets{sourceView}->set_mark_attributes( "error", $attrs, 10 );
+    $widgets->sourceView->set_show_line_marks(1);
+    $widgets->sourceView->set_editable(0);
+    $widgets->sourceView->set_wrap_mode('none');
+    $widgets->sourceView->set_mark_attributes( "error", $attrs, 10 );
 
     # theme support for buffers
     my $manager = Gtk::Source::StyleSchemeManager::get_default();
@@ -1267,37 +1416,42 @@ sub build_ui {
     foreach my $theme (@$themes) {
         my $item = Gtk3::MenuItem->new_with_label($theme);
         $item->signal_connect( 'activate' => \&onTheme );
-        $widgets{themesMenu}->add($item);
+        $widgets->themesMenu->add($item);
     }
 
 	# default schema
     $scheme = $manager->get_scheme("solarized-dark");
 
 	# prepare the info buffer to display call stack
-    $infoBuffer = $widgets{infoPane}->get_buffer();
-    $widgets{infoPane}->set_editable(0);
+    my $infoBuffer = $widgets->infoPane->get_buffer();
+    $widgets->infoPane->set_editable(0);
     $infoBuffer->set_style_scheme($scheme);
+	$widgets->add( infoBuffer => $infoBuffer );
 
 	# prepare the lexical vars display buffer
-    $lexicalsBuffer = Gtk::Source::Buffer->new();
+    my $lexicalsBuffer = Gtk::Source::Buffer->new();
     $lexicalsBuffer->set_language($lang);
     $lexicalsBuffer->set_style_scheme($scheme);
+	$widgets->add( lexicalsBuffer => $lexicalsBuffer );
 
 	# buffer to show loaded subroutines
-    $subsBuffer = Gtk::Source::Buffer->new();
+    my $subsBuffer = Gtk::Source::Buffer->new();
     $subsBuffer->set_style_scheme($scheme);
+	$widgets->add( subsBuffer => $subsBuffer);
 
 	# buffer to show loaded files
-    $filesBuffer = Gtk::Source::Buffer->new();
+    my $filesBuffer = Gtk::Source::Buffer->new();
     $filesBuffer->set_style_scheme($scheme);
+	$widgets->add( filesBuffer => $filesBuffer );
 
 	# buffer to show loaded breakpoints
-    $breakpointsBuffer = Gtk::Source::Buffer->new();
+    my $breakpointsBuffer = Gtk::Source::Buffer->new();
     $breakpointsBuffer->set_style_scheme($scheme);
+	$widgets->add( breakpointsBuffer => $breakpointsBuffer );
 
 	# prepare the var inspection tree view
-	my $treeModel = $widgets{LexicalTreeStore};
-	$widgets{lexicalTreeView}->set_model($treeModel);
+	my $treeModel = $widgets->LexicalTreeStore();
+	$widgets->lexicalTreeView->set_model($treeModel);
 
 	my $renderer1 = Gtk3::CellRendererText->new ();
 	my $renderer2 = Gtk3::CellRendererText->new ();
@@ -1314,7 +1468,7 @@ sub build_ui {
 	$column1->set_title("Var");
   	$column1->pack_start($renderer1, 0);	
 	$column1->add_attribute($renderer1,"text",0);
-	$widgets{lexicalTreeView}->append_column( $column1);
+	$widgets->lexicalTreeView->append_column( $column1);
 
 	my $column2 = Gtk3::TreeViewColumn->new();
 	$column2->set_resizable(1);
@@ -1323,7 +1477,7 @@ sub build_ui {
 	$column2->set_title("Info");
   	$column2->pack_start($renderer2, 0);	
 	$column2->add_attribute($renderer2,"text",1);
-	$widgets{lexicalTreeView}->append_column( $column2 );
+	$widgets->lexicalTreeView->append_column( $column2 );
 
 	# enable if you want to see the hidden 'path' data
 	# value of the the tree view in the third column
@@ -1337,34 +1491,31 @@ sub build_ui {
 	# $column3->add_attribute($renderer3,"text",2);
 	# $widgets{lexicalTreeView}->append_column( $column3 );
 
-	$widgets{lexicalTreeView}->signal_connect( 'row-expanded' => \&onRowExpanded );
-	$widgets{lexicalTreeView}->set_enable_tree_lines(1);
+	$widgets->lexicalTreeView->signal_connect( 'row-expanded' => \&onRowExpanded );
+	$widgets->lexicalTreeView->set_enable_tree_lines(1);
 
 	# prepare search support
-	$searchSettings = Gtk::Source::SearchSettings->new();
+	my $searchSettings = Gtk::Source::SearchSettings->new();
 	$searchSettings->set_wrap_around(1);
 	$searchSettings->set_regex_enabled(1);
 	$searchSettings->set_case_sensitive(0);
+	$widgets->add( searchSettings => $searchSettings );
 	
 	# set everything to disabled on startup
     enableButtons(0);
 
 	# enable button stop, just to be sure
-    $widgets{buttonStop}->set_sensitive(1);
+    $widgets->buttonStop->set_sensitive(1);
 
 	# keyboard shortcut accelerators
-	$widgets{accel} = Gtk3::AccelGroup->new();
-
-	foreach my $accel( keys %accelerators ) {
-
-		my ($key,$mod) = Gtk3::accelerator_parse($accel);
-		$widgets{accel}->connect( $key, $mod, [], $accelerators{$accel} );
-	}
-
-	$widgets{mainWindow}->add_accel_group($widgets{accel});
+	$widgets->add( accel => Gtk3::AccelGroup->new() );
+	$widgets->mainWindow->add_accel_group($widgets->accel);
 
     # show the UI
-    $widgets{mainWindow}->show_all();
+    $widgets->mainWindow->show_all();
+
+	add_actions( $widgets->mainWindow );
+	add_accels();
 }
 
 ##################################################
