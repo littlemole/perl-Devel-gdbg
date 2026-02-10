@@ -62,11 +62,20 @@ Glib::Object::Introspection->setup(
     package  => 'Gtk::Source'
 );
 
+##################################################
+# Widgets Collection Helper
+# access all the Gtk Widget objects by name
+# the 'name' is the id attribute from
+# the glade xml description
+##################################################
+
+##################################################
 package Widgets;
+##################################################
 
 sub new {
 	my $class   = shift;
-	my $widgets = shift;
+	my $widgets = shift; # hash name => widget
 
 	my $self = {
 		widgets => $widgets
@@ -83,6 +92,11 @@ sub add {
 	$self->{widgets}->{$name} = $widget; 
 }
 
+# fake $widget accessors: calling
+#     $widgets->widget_name()
+# is equivalent to
+#     $widgets->{widgets}->{widget_name}
+
 sub AUTOLOAD {
 
 	no strict;
@@ -98,7 +112,9 @@ sub AUTOLOAD {
 	return $widgets->{$method};
 }
 
+##################################################
 package gdbgui;
+##################################################
 
 ##################################################
 # Debugger UI globals
@@ -129,9 +145,12 @@ my $searchCtx;         				  # search ctx
 
 
 ##################################################
-# actions and accelerators
+# msghandlers, actions and accelerators
+# these will be auto-populated from
+# sub metadata attributes
 ##################################################
 
+my %msgHandlers;
 my %simpleActions;
 my %detailedActions;
 my @accels;
@@ -163,9 +182,14 @@ sub MODIFY_CODE_ATTRIBUTES {
 		if( $attr =~ /^Accel\(([^\)]+)\)$/ ) {
 
 			push @accels, {
-				key => $1,
+				key     => $1,
 				handler => $coderef,
 			};
+		}
+
+		if( $attr =~ /^RPC$/ ) {
+
+			$msgHandlers{$fun} = $coderef;
 		}
 	}
 
@@ -173,15 +197,13 @@ sub MODIFY_CODE_ATTRIBUTES {
 }
 
 
-# INT signal handler
-sub dbint_handler {
-
-    $quit = 1;
-}
-
 ##################################################
 # main UI action handlers
 ##################################################
+
+#-------------------------------------------------
+# high level Gtk Action handlers
+#-------------------------------------------------
 
 # run command - continue until next breakpoint
 sub onRun :Action {
@@ -264,6 +286,55 @@ sub onScroll :Action {
     scroll($currentFile,$currentLine);
 }
 
+# user selected 'Show Lexicals' from file menu
+sub onLexicals :Action {
+
+	$rpc->lexicals();
+}
+
+# show breakpoints window menu handler
+sub onBreakpoints :Action {
+
+	$rpc->breakpoints();
+}
+
+sub onStoreBreakpoints :Action {
+
+	$rpc->storebreakpoints();
+}
+
+# show subroutines window menu handler
+sub onSubs :Action {
+
+	$rpc->functions();	
+}
+
+# reload the current, active file, if any
+sub onReload :Action {
+
+	my $widget = shift;
+	my $event = shift;
+
+	$rpc->fetch($currentFile,$currentLine);	
+}
+
+# show files view
+sub onFiles :Action {
+
+	my @files = keys %files;
+	my @sorted = sort(@files);
+	my $text = join("\n", @sorted);
+
+	$widgets->filesBuffer->set_text($text,-1);
+
+	$widgets->sourceView->set_buffer($widgets->filesBuffer);
+	$widgets->mainWindow->set_title("Files loaded by the debugger:");
+}
+
+#-------------------------------------------------
+# low level Gtk signal handlers
+#-------------------------------------------------
+
 # set a breakpoint UI handler (click on marker of sourceView)
 sub onMarker {
     my ( $self, $iter, $event ) = @_;
@@ -305,7 +376,7 @@ sub onMarker {
 	$rpc->breakpoint($filename,$line);
 }
 
-
+# toggle the breakpoint on current line
 sub onToggleBreakpoint :Accel(<ctrl>BackSpace) {
 
 	if($uiDisabled) {
@@ -344,6 +415,7 @@ sub onToggleBreakpoint :Accel(<ctrl>BackSpace) {
 	$rpc->breakpoint($currentFile,$line);
 }
 
+# toggle running state (Stop/Run)
 sub onToggleRunning :Accel(<ctrl>space) {
 
 	if($uiDisabled) {
@@ -354,29 +426,6 @@ sub onToggleRunning :Accel(<ctrl>space) {
 
 		onRun();
 	}
-}
-
-# user selected 'Show Lexicals' from file menu
-sub onLexicals :Action {
-
-	$rpc->lexicals();
-}
-
-# show breakpoints window menu handler
-sub onBreakpoints :Action {
-
-	$rpc->breakpoints();
-}
-
-sub onStoreBreakpoints :Action {
-
-	$rpc->storebreakpoints();
-}
-
-# show subroutines window menu handler
-sub onSubs :Action {
-
-	$rpc->functions();	
 }
 
 # user clicks the call frame stack
@@ -398,14 +447,6 @@ sub onInfoPaneClick {
 	}
 }
 
-# reload the current, active file, if any
-sub onReload :Action {
-
-	my $widget = shift;
-	my $event = shift;
-
-	$rpc->fetch($currentFile,$currentLine);	
-}
 
 # mouse click on a line, if on breakpoints, files or subroutines view
 sub onClick {
@@ -444,19 +485,6 @@ sub onClick {
 		openFile($text,1);
 		return;
 	}
-}
-
-# show files view
-sub onFiles :Action {
-
-	my @files = keys %files;
-	my @sorted = sort(@files);
-	my $text = join("\n", @sorted);
-
-	$widgets->filesBuffer->set_text($text,-1);
-
-	$widgets->sourceView->set_buffer($widgets->filesBuffer);
-	$widgets->mainWindow->set_title("Files loaded by the debugger:");
 }
 
 # lazily load var inspection tree content
@@ -713,169 +741,196 @@ sub onSearchRegexEnabled {
 
 
 ##################################################
-# process messages from debugger
+# process rpc messages from debugger
 ##################################################
 
-my %msg_handlers = (
-	quit => sub {
-		$quit = 2;
-	},
-	cwd => sub {
-		my $cwd = shift;
+sub	quit :RPC {
 
-		$widgets->statusBar->set_text($cwd);
-		chdir $cwd;
-	},
-	pid => sub {
-		$pid = shift;
-	},
-	file => sub {
+	$quit = 2;
+}
 
-		my $file = shift;
-		my $line = shift;
+sub	cwd :RPC {
+	
+	my $cwd = shift;
+	$widgets->statusBar->set_text($cwd);
+	chdir $cwd;
+}
 
-		$currentLine = $line;
-		$currentFile = $file;
+sub	pid :RPC {
+	
+	$pid = shift;
+}
 
+sub	file :RPC {
+
+	my $file = shift;
+	my $line = shift;
+
+	$currentLine = $line;
+	$currentFile = $file;
+
+	scroll($file,$line);
+	enableButtons(1);		
+}
+
+sub show :RPC {
+	# show file at line (like display above)
+	# but do not set current file
+	my $file = shift;
+	my $line = shift;
+
+	scroll($file,$line);
+	enableButtons(1);		
+}
+
+sub	info :RPC {
+	# display call stack info
+
+	my $file = shift;
+	my $line = shift;
+	my $info = shift;
+
+	$currentLine = $line;
+	$currentFile = $file;
+
+	$widgets->infoBuffer->set_text( $info, -1 );		
+	$rpc->jsonlexicals("/");
+}
+
+sub	lexicals :RPC {
+	# display lexicals
+
+	my $file = shift;
+	my $line = shift;
+	my $info = shift;
+
+	$widgets->lexicalsBuffer->set_text( $info, -1 );
+	$widgets->sourceView->set_buffer($widgets->lexicalsBuffer);
+	$widgets->mainWindow->set_title("All current lexical variables:");
+}
+
+sub	jsonlexicals :RPC {
+
+	my $file = shift;
+	my $target = shift;
+	my $info = decode_json(shift);
+
+	my $model = $widgets->lexicalTreeView->get_model;
+	if($target eq '/') {
+		$model->clear;
+	}
+
+	my $root = undef;
+	my $result = find_root($target,$root);
+	if($result->{found}) {
+		my $iter = $result->{result};
+		my $path = '';
+		if($iter) {
+			$path = $model->get_value($iter,2);
+		}
+		populate_lexicals($info,$model,$iter,$path);
+	}
+	else {
+		populate_lexicals($info,$model,$root);
+	}
+}
+
+sub	breakpoints :RPC {
+	# display breakpoints
+	my $info = shift;
+
+	$widgets->breakpointsBuffer->set_text( $info, -1 );
+	$widgets->sourceView->set_buffer($widgets->breakpointsBuffer);
+	$widgets->mainWindow->set_title("All breakpoints currently set:");
+}
+
+sub	setbreakpoints :RPC {
+	# set breakpoints for file
+
+	my $file  = shift;
+	my $lines = shift;
+	my @lines = split ',' , $lines;
+
+	my $buf = $sourceBuffers{$file};
+	if(!$buf) {
+		return;
+	}
+
+	my $start = $buf->get_start_iter;
+	my $end   = $buf->get_end_iter;
+
+	$buf->remove_source_marks($start,$end,"error");
+
+	foreach my $line ( @lines ) {
+
+		my $bpn = $file . ":" . $line;
+		my $iter = $buf->get_iter_at_line( $line - 1 );
+		$sourceBuffers{$file}->create_source_mark( $bpn, "error", $iter );
+	}
+}
+
+sub	load :RPC {
+	# load file,line,source
+
+	my $file = shift;
+	my $line = shift;
+	my $src  = shift;
+	$widgets->statusBar->set_text("$file");
+
+	$files{$file} = $src;
+	# discuss whether this if is a good idea?
+	if ( $file !~ /^\/usr\// ) {
 		scroll($file,$line);
-		enableButtons(1);		
-	},
-	show => sub {
-		# show file at line (like display above)
-		# but do not set current file
-		my $file = shift;
-		my $line = shift;
+	}
+}
 
-		scroll($file,$line);
-		enableButtons(1);		
-	},
-	info => sub {
-		# display call stack info
+sub	eval :RPC {
+	# eval results passed as string
 
-		my $file = shift;
-		my $line = shift;
-		my $info = shift;
+	my $evaled = shift // '<undef>';
+	$widgets->lexicalsBuffer->set_text( $evaled, -1 );
+	$widgets->sourceView->set_buffer($widgets->lexicalsBuffer);
+}
 
-		$currentLine = $line;
-		$currentFile = $file;
+sub	subs :RPC {
+	# all known subroutines for display
 
-		$widgets->infoBuffer->set_text( $info, -1 );		
-		$rpc->jsonlexicals("/");
-	},
-	lexicals => sub {
-		# display lexicals
+	my $subs = shift;
+	$widgets->subsBuffer->set_text( $subs, -1 );
+	$widgets->sourceView->set_buffer($widgets->subsBuffer);
+	$widgets->mainWindow->set_title("All subroutines loaded:");
+}
 
-		my $file = shift;
-		my $line = shift;
-		my $info = shift;
-
-		$widgets->lexicalsBuffer->set_text( $info, -1 );
-		$widgets->sourceView->set_buffer($widgets->lexicalsBuffer);
-		$widgets->mainWindow->set_title("All current lexical variables:");
-	},
-	jsonlexicals => sub {
-
-		my $file = shift;
-		my $target = shift;
-		my $info = decode_json(shift);
-
-		my $model = $widgets->lexicalTreeView->get_model;
-		if($target eq '/') {
-			$model->clear;
-		}
-
-		my $root = undef;
-		my $result = find_root($target,$root);
-		if($result->{found}) {
-			my $iter = $result->{result};
-			my $path = '';
-			if($iter) {
-				$path = $model->get_value($iter,2);
-			}
-			populate_lexicals($info,$model,$iter,$path);
-		}
-		else {
-			populate_lexicals($info,$model,$root);
-		}
-	},
-	breakpoints => sub {
-		# display breakpoints
-		my $info = shift;
-
-		$widgets->breakpointsBuffer->set_text( $info, -1 );
-		$widgets->sourceView->set_buffer($widgets->breakpointsBuffer);
-		$widgets->mainWindow->set_title("All breakpoints currently set:");
-	},
-	setbreakpoints => sub {
-		# set breakpoints for file
-
-		my $file  = shift;
-		my $lines = shift;
-		my @lines = split ',' , $lines;
-
-		my $buf = $sourceBuffers{$file};
-		if(!$buf) {
-			return;
-		}
-
-		my $start = $buf->get_start_iter;
-		my $end   = $buf->get_end_iter;
-
-		$buf->remove_source_marks($start,$end,"error");
-
-		foreach my $line ( @lines ) {
-
-			my $bpn = $file . ":" . $line;
-			my $iter = $buf->get_iter_at_line( $line - 1 );
-			$sourceBuffers{$file}->create_source_mark( $bpn, "error", $iter );
-		}
-	},
-	load => sub {
-		# load file,line,source
-
-		my $file = shift;
-		my $line = shift;
-		my $src  = shift;
-		$widgets->statusBar->set_text("$file");
-
-		$files{$file} = $src;
-		# discuss whether this if is a good idea?
-		if ( $file !~ /^\/usr\// ) {
-			scroll($file,$line);
-		}
-	},
-	eval => sub {
-		# eval results passed as string
-
-		my $evaled = shift // '<undef>';
-		$widgets->lexicalsBuffer->set_text( $evaled, -1 );
-		$widgets->sourceView->set_buffer($widgets->lexicalsBuffer);
-	},
-	subs => sub {
-		# all known subroutines for display
-
-		my $subs = shift;
-		$widgets->subsBuffer->set_text( $subs, -1 );
-		$widgets->sourceView->set_buffer($widgets->subsBuffer);
-		$widgets->mainWindow->set_title("All subroutines loaded:");
-	},
-);
+#-------------------------------------------------
+# process a single RPC message by dispatching
+# it to the appropriate :RPC handler sub
+#-------------------------------------------------
 
 sub process_msg {
 
     my $msg = shift;
 
 	my $cmd = $msg->{cmd};
-	my $params = $msg ->{params} // [];
+	my $params = $msg->{params} // [];
 
-	if ( $cmd && exists $msg_handlers{$cmd}) {
-		$msg_handlers{$cmd}->( $params->@* );
+	if ( $cmd && exists $msgHandlers{$cmd}) {
+		$msgHandlers{$cmd}->( $params->@* );
 	}
 	else {
 		print STDERR "unknown $cmd. ".Dumper($msg);
 	}
 }
 
+
+##################################################
+# SIGINT UNIX signal handler
+##################################################
+
+# deprecated (unused)
+sub dbint_handler {
+
+    $quit = 1;
+}
 
 ##################################################
 # UI helpers
@@ -942,19 +997,10 @@ sub loadBuffer {
 	my $content = $files{$file};
 	if( !$content ) {
 
-		# if file exists on disk, read it in
-		if(-e $file) {
-
-			$content = slurp($file, binmoder => 'utf8' );
-		}
-		# otherwise ask the debugger process for the file
-		else {
-			# temp dummy content
-			$content = '<unknown>'; # 
-			# ask debugger to provide file
-			#$fifo->write({ cmd => "fetch", params => [$file,$line] });			
-			$rpc->fetch($file,$line);
-		}
+		# temp dummy content
+		$content = '<unknown>'; # 
+		# ask debugger to provide file
+		$rpc->fetch($file,$line);
 		$files{$file} = $content;
 	}
 	
@@ -1096,9 +1142,14 @@ sub scroll {
     }
 }
 
-################################
+##################################################
 # variable inspector support
-################################
+##################################################
+
+#-------------------------------------------------
+# find a node '$target' in the var inspection tree
+# returning a Gtk TreeWidget iterator
+#-------------------------------------------------
 
 sub find_root {
 	my ($target,$root) = @_;
@@ -1152,6 +1203,7 @@ sub find_root {
 	};
 }
 
+# simple helper to produce a GLib GValue
 sub GValue {
 
 	my $value = shift;
@@ -1168,6 +1220,8 @@ sub GValue {
 	my $gv = Glib::Object::Introspection::GValueWrapper->new ( $type, $value);
 	return $gv;
 }
+
+# populate an Gtk TreeView node
 
 sub populate_item {
 
@@ -1214,6 +1268,8 @@ sub populate_item {
 		}
 	}
 }
+
+# populate the tree view (or parts of it)
 
 sub populate_lexicals {
 
@@ -1269,6 +1325,7 @@ sub populate_lexicals {
 # build the ui once using gtk builder
 ##################################################
 
+# make $widgets available to UI controller
 sub mapWidgets {
 
     my $builder = shift;
@@ -1282,31 +1339,9 @@ sub mapWidgets {
 	}
 
 	$widgets = Widgets->new( \%widgets );
-
-    # my @widgetNames = qw(
-    #   mainWindow statusBar
-    #   windowMenu themesMenu
-    #   lexicalsMenu breakpointsMenu
-	#   showSubsMenu showFilesMenu
-    #   openFileMenu evalEntry
-    #   sourceView infoPane
-    #   openFile scrollMenu lexicalsMenu
-    #   buttonRun buttonStep buttonOver
-    #   buttonOut buttonStop buttonLexicals
-    #   buttonHome search searchDialog
-	#   searchBackward searchForward
-	#   lexicalTreeView LexicalTreeStore
-	#   sourcesCombo imageLookup imageCancel
-	#   cancelSearch
-    # );
-
-    # foreach my $wn (@widgetNames) {
-
-    #     my $widget = $builder->get_object($wn);
-    #     $widgets{$wn} = $widget;
-    # }
 }
 
+# connect signals specified in XML
 sub connect_signals {
 
     my ( $builder, $obj, $signal, $handler, $co, $flags, $data ) = @_;
@@ -1314,24 +1349,13 @@ sub connect_signals {
     $obj->signal_connect( $signal => \&$handler );
 }
 
-# my %accelerators = (
-# 	"<ctrl>Right" =>  \&onStep,
-# 	"<ctrl>Down" => \&onOver,
-# 	"<ctrl>Left" => \&onOut,
-# 	"<ctrl>f" => \&onFocusSearch,
-# #	"<ctrl>space" =>  \&onToggleRunning,
-# 	"<ctrl>BackSpace" => \&onToggleBreakpoint,
-# );
-
-
+# prepare action specified with :Action and :DetailedAction 
+# sub attributes
 sub add_actions {
 
   	my $mainWindow = shift;
 
-#	my $actionGroup = Gtk3::ActionGroup->new("actions");
-
 	for my $key ( keys %simpleActions ) {
-		print STDERR "Simple Action: $key\n";
 
 		my $handler = $simpleActions{$key};
 
@@ -1342,7 +1366,6 @@ sub add_actions {
 	}
 
 	for my $key ( keys %detailedActions ) {
-		print STDERR "Detailed Action: $key\n";
 
 		my $handler = $detailedActions{$key};
 
@@ -1354,42 +1377,42 @@ sub add_actions {
 
 		$mainWindow->add_action($action);    
 	}
-
-#	$widgets{actionGroup} = $actionGroup;
 }
 
+# add accelerators specifiec with :Accel attributes
 sub add_accels {
+
+	$widgets->add( accel => Gtk3::AccelGroup->new() );
+	$widgets->mainWindow->add_accel_group($widgets->accel);
 
 	for my $accel ( @accels ) {
 
 		my $key     = $accel->{key};
 		my $handler = $accel->{handler};
 
-		print STDERR "Accel: $key\n";
-
 		my ($key,$mod) = Gtk3::accelerator_parse($key);
 		$widgets->accel->connect( $key, $mod, [], $handler );
 	}
 }
 
-
+# Gtk Builder - load UI from XML
 sub build_ui {
 
 	# load widgets from xml
     my $builder = Gtk3::Builder->new();
     $builder->add_from_file($uixml) or die 'file not found';
 
-	my $list = $builder->get_objects();
-	for my $w ( @$list ) {
-		print STDERR  Dumper($w);
-		print STDERR Gtk3::Buildable::get_name($w)."\n";
-	}
-
 	# get references to widgets
     mapWidgets($builder);
 
 	# connect UI signal handlers
     $builder->connect_signals_full( \&connect_signals, 0 );
+
+	# keyboard shortcut accelerators
+	add_accels();
+
+	# attach actions
+	add_actions( $widgets->mainWindow );
 
 	# Perl syntax highlighting support
     my $langManager = Gtk::Source::LanguageManager->new();
@@ -1459,7 +1482,7 @@ sub build_ui {
 	# enable if you want to see the hidden 'path' data
 	# value of the the tree view in the third column
 
-	#my $renderer3 = Gtk3::CellRendererText->new ();
+	# my $renderer3 = Gtk3::CellRendererText->new ();
 
 	my $column1 = Gtk3::TreeViewColumn->new();
 	$column1->set_resizable(1);
@@ -1507,15 +1530,8 @@ sub build_ui {
 	# enable button stop, just to be sure
     $widgets->buttonStop->set_sensitive(1);
 
-	# keyboard shortcut accelerators
-	$widgets->add( accel => Gtk3::AccelGroup->new() );
-	$widgets->mainWindow->add_accel_group($widgets->accel);
-
     # show the UI
     $widgets->mainWindow->show_all();
-
-	add_actions( $widgets->mainWindow );
-	add_accels();
 }
 
 ##################################################
@@ -1528,10 +1544,10 @@ sub initialize {
 
     $ctx = GLib::MainContext::default();
 
-    $SIG{'INT'} = "dbgui::dbint_handler";
+	#deprecated:  
+	#$SIG{'INT'} = "dbgui::dbint_handler";
 
     # the IPC named pipe (fifo) for comms with the debugger
-
 
 	my $fifo_dir = $ENV{"GDBG_FIFO_DIR"} || '/tmp/';
 
@@ -1539,26 +1555,33 @@ sub initialize {
     $fifo->open_in( "$fifo_dir/perl_debugger_fifo_out");
     $fifo->open_out("$fifo_dir/perl_debugger_fifo_in");
 
+	# high level RPC wrapper on top of $fifo
 	$rpc = Devel::dipc::RPC->new($fifo);
 
-#	$fifo->write("init");
+	# deprecated
+	# $fifo->write("init");
 
 	if ( $ENV{"GDBG_NO_FORK"} ) {
+
+		# possibly re-attaching the debugger UI to
+		# the process being debugged. 
 		onStop();		
-		#$fifo->write({ cmd => "next", params => [] });
 		$rpc->next();
 	}
 
-
+	# show the UI
 	build_ui();
 }
 
 ##################################################
-# THE ui main loop
+# THE ui MAIN loop
 ##################################################
 
+# initialize the app
 initialize();
 
+# run the main event loop, handling both
+# Gtk and IPC fifo events
 while ( !$quit ) {
 
     # pump GTK events
@@ -1582,7 +1605,6 @@ if ( $quit == 1 )
 	if(!$ENV{"GDBG_KILL_CMD"}) {
     	kill 'INT', $pid;
 	}
-	#$fifo->write({ cmd => "quit", params => [] });
 	$rpc->quit();
 }
 

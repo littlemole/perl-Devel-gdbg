@@ -75,6 +75,7 @@ my $lexicals;            # caches current lexicals (for eval)
 my %files;               # map abs path -> filename as seen by debugger
 my %postpone;            # postponed break points
 my $lastSelection = '';
+
 ##################################################
 ##################################################
 
@@ -86,7 +87,7 @@ sub dbint_handler {
 $SIG{'INT'} = "DB::dbint_handler";
 
 ##################################################
-# initialize
+# initialize IPC
 ##################################################
 
 my $fifo_dir = $ENV{"GDBG_FIFO_DIR"} || '/tmp/';
@@ -398,6 +399,8 @@ sub dumpBreakpoints {
     write_file( ".pgdbbrkpts", @a );
 }
 
+# oh boy, that was a lot of breakpoint handling
+
 ##############################################
 # update the call frame stack info
 ##############################################
@@ -449,10 +452,10 @@ sub updateInfo {
 }
 
 ##################################################
-# var inspector support
+# UI var inspector support
 ##################################################
 
-
+# helper to truncate values displayed in UI tree
 sub truncate_lex {
 	my $value = shift;
 	
@@ -462,6 +465,9 @@ sub truncate_lex {
 	return substr($value,0,255);
 }
 
+# helper to de-reference a Perl data structure
+# suitable to be serialized as JSON and then
+# displayed as a UI tree
 sub deref {
 
 	my ($source,$start,$target) = shift;
@@ -564,6 +570,8 @@ sub deref {
 	};
 }
 
+# helper to find a chlld node,
+# used if expanding a tree node in the UI
 sub find_lex_src {
 
 	my ($source,$target) = @_;
@@ -593,7 +601,7 @@ sub find_lex_src {
 	return;
 }
 
-
+# expand a lexical variable
 sub expand_lex {
 	my ($source,$isRoot,$level) = @_;
 
@@ -803,7 +811,7 @@ sub getSubLine {
     my ($name) = shift;
 
     if ( !exists $DB::sub{$name} ) {
-#        print "No subroutine $name.  Try main::$name\n";
+        # print "No subroutine $name.  Try main::$name\n";
         return;
     }
 
@@ -964,6 +972,12 @@ my %msg_handlers = (
 		if($files{$file}) {
 
 			my $src = dbdumpsrc($files{$file});
+			$rpc->load($file,$line,$src);
+		}
+		elsif( -e $file ) {
+				
+			my $abspath = abs_path(find_file($file));
+			my$src = slurp($abspath);
 			$rpc->load($file,$line,$src);
 		}
 	},

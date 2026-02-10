@@ -72,8 +72,6 @@ sub write {
     my $self = shift;
     my $msg  = shift;
 
-#    my $data = $self->_encode_msg($msg);
-
 	my $json = JSON->new()->allow_blessed()->allow_unknown();
 
 	my $jsondata = $json->utf8->encode($msg);
@@ -137,7 +135,6 @@ sub _read_data {
 
     if ( length( $self->{buf} ) == $self->{datalen} ) {
 
-#        my $msg = Encode::decode_utf8( $self->{buf} );
 		my $msg = decode_json( $self->{buf} );
 
         $self->{buf}     = undef;
@@ -148,7 +145,6 @@ sub _read_data {
 
         $self->_read_size();
     }
-
 }
 
 sub close {
@@ -217,8 +213,12 @@ sub _makemyfifo {
     mkfifo( $path, 0777 ) || die "mkfifo $path already exists: $!"; 
 }
 
-
+###############################################
 package Devel::dipc::RPC;
+###############################################
+
+# high level rpc abstraction to hide
+# the fifo write complexitiy
 
 sub new {
 
