@@ -582,6 +582,14 @@ sub onSearch {
 		return 0;
 	}
 
+	return doSearch($widget,$event);
+}
+
+sub doSearch {
+
+	my $widget = shift;
+	my $event = shift;
+
 	# check for shift key being pressed
 	my ($unused,$state) = $event->get_state();
 
@@ -595,7 +603,24 @@ sub onSearch {
 		}
 	}
 
-	my $query = $widget->get_text();
+	# right click
+	if($event->button->{button} == 3) {
+
+		my $dialog = $widgets->searchDialog;
+
+		my $active = $searchDirection eq 'forward' ? 1 : 0;
+		$widgets->searchForward->set_active($active);
+		$widgets->searchBackward->set_active(!$active);
+
+		$dialog->set_transient_for($widgets->mainWindow);
+		$dialog->set_modal(1);
+		$dialog->show_all;
+
+		return 0;
+	}
+
+
+	my $query = $widgets->search->get_text();
 
 	$widgets->searchSettings->set_search_text($query);
 
@@ -850,8 +875,6 @@ sub	setbreakpoints :RPC {
 	my $file  = shift;
 	my $lines = shift;
 	my @lines = split ',' , $lines;
-
-print STDERR "BR: $file ".Dumper($lines);	
 
 	my $buf = $sourceBuffers{$file};
 	if(!$buf) {
@@ -1486,6 +1509,7 @@ sub build_ui {
 
 	# my $renderer3 = Gtk3::CellRendererText->new ();
 
+	# name column
 	my $column1 = Gtk3::TreeViewColumn->new();
 	$column1->set_resizable(1);
 	$column1->set_sizing('fixed');
@@ -1495,6 +1519,7 @@ sub build_ui {
 	$column1->add_attribute($renderer1,"text",0);
 	$widgets->lexicalTreeView->append_column( $column1);
 
+	# value column
 	my $column2 = Gtk3::TreeViewColumn->new();
 	$column2->set_resizable(1);
 	$column2->set_sizing('fixed');
@@ -1549,7 +1574,7 @@ sub initialize {
 	#deprecated:  
 	#$SIG{'INT'} = "dbgui::dbint_handler";
 
-    # the IPC named pipe (fifo) for comms with the debugger
+    # the IPC named pipes (fifos) for comms with the debugger
 
 	my $fifo_dir = $ENV{"GDBG_FIFO_DIR"} || '/tmp/';
 

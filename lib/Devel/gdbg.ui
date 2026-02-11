@@ -539,12 +539,27 @@ stepping over any function calls.</property>
 					</packing>
 				</child>
 				<child>
-					<object class="GtkButton" id="cancelSearch">
+					<object class="GtkButton" id="doSearch">
 						<property name="visible">True</property>
 						<property name="can-focus">True</property>
 						<property name="receives-default">True</property>
 						<property name="tooltip-text" translatable="yes">Cancel Search</property>
 						<property name="image">imageLookup</property>
+						<signal name="button-press-event" handler="doSearch" swapped="no"/>
+					</object>
+					<packing>
+						<property name="expand">False</property>
+						<property name="fill">True</property>
+						<property name="position">7</property>
+					</packing>
+				</child>
+				<child>
+					<object class="GtkButton" id="cancelSearch">
+						<property name="visible">True</property>
+						<property name="can-focus">True</property>
+						<property name="receives-default">True</property>
+						<property name="tooltip-text" translatable="yes">Cancel Search</property>
+						<property name="image">imageCancel</property>
 						<signal name="button-press-event" handler="onCancelSearch" swapped="no"/>
 					</object>
 					<packing>
