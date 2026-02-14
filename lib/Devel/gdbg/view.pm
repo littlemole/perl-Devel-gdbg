@@ -141,7 +141,8 @@ sub build_ui {
 
 	    my ( $builder, $obj, $signal, $handler, $co, $flags, $data ) = @_;
 
-		my $signalHandler = \&{'controller::'."$handler"};
+		my $class = ref $controller;
+		my $signalHandler = \&{"$class"."::"."$handler"};
     	$obj->signal_connect( $signal => sub {
 
 			return $signalHandler->( $controller, @_ );

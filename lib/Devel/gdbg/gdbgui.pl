@@ -911,7 +911,9 @@ sub onEval :Action {
 # user selected open-file from menu
 sub onOpen :Action {
 
-	my $self = shift;
+	my $self   = shift;
+	my $action = shift;
+	my $param  = shift;
 
     # show open file dialog
     my $dlg = Gtk3::FileChooserNative->new( 

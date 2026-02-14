@@ -246,6 +246,9 @@
 														<property name="use-stock">False</property>
 														<property name="always-show-image">True</property>
 														<property name="action-name">win.onOpen</property>
+<!--														
+														<property name="action-target">'String test'</property>
+-->														
 													</object>
 												</child>
 												<child>
