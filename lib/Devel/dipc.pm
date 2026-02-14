@@ -234,6 +234,10 @@ sub new {
     return $self;	
 }
 
+sub DESTROY {
+	
+}
+
 sub AUTOLOAD {
 
 	no strict;
