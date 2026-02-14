@@ -46,7 +46,7 @@ sub MODIFY_CODE_ATTRIBUTES {
 }
 
 # prevent AUTLOAD to treat
-# DESTRPY as property
+# DESTROY as property
 sub DESTROY {
 	
 }

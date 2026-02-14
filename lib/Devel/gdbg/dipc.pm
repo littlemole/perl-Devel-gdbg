@@ -1,4 +1,4 @@
-package Devel::dipc;
+package Devel::gdbg::dipc;
 
 use v5.20;
 use strict;
@@ -214,7 +214,7 @@ sub _makemyfifo {
 }
 
 ###############################################
-package Devel::dipc::RPC;
+package Devel::gdbg::dipc::RPC;
 ###############################################
 
 # high level rpc abstraction to hide

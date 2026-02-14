@@ -9,7 +9,6 @@ use strict;
 ##################################################
 
 use File::Basename;
-
 use Glib::Object::Introspection;
 
 ##################################################
@@ -23,6 +22,7 @@ BEGIN {
 		version  => '2.0',
 		package  => 'GLib'
 	);
+
 
 	Glib::Object::Introspection->setup(
 		basename => 'Gio',
@@ -141,8 +141,11 @@ sub build_ui {
 
 	    my ( $builder, $obj, $signal, $handler, $co, $flags, $data ) = @_;
 
-		my $signalHandler = "$controller".'::'."$handler";
-    	$obj->signal_connect( $signal => \&$signalHandler );
+		my $signalHandler = \&{'controller::'."$handler"};
+    	$obj->signal_connect( $signal => sub {
+
+			return $signalHandler->( $controller, @_ );
+		});
 
 	}, 0 );
 
@@ -156,7 +159,10 @@ sub build_ui {
 		my $handler = $accel->{handler};
 
 		my ($key,$mod) = Gtk3::accelerator_parse($key);
-		$self->accel->connect( $key, $mod, [], $handler );
+		$self->accel->connect( $key, $mod, [], sub {
+
+			return $handler->( $controller, @_ );
+		});
 	}
 
 	# attach actions
@@ -167,7 +173,10 @@ sub build_ui {
 		my $handler = $simpleActions{$key};
 
 		my $action = Glib::IO::SimpleAction->new($key);
-		$action->signal_connect("activate", $handler);
+		$action->signal_connect("activate", sub {
+
+			return $handler->( $controller, @_ );
+		});
 
 		$self->mainWindow->add_action($action);    
 	}
@@ -181,7 +190,10 @@ sub build_ui {
 		my $gv  = Glib::Variant->new_string("");
 
 		my $action = Glib::IO::SimpleAction->new_stateful($key,$gvt,$gv);
-		$action->signal_connect("activate", $handler);
+		$action->signal_connect("activate", sub {
+
+			return $handler->( $controller, @_ );
+		});
 
 		$self->mainWindow->add_action($action);    
 	}

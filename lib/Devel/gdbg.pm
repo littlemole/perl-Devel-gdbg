@@ -17,7 +17,7 @@ our $VERSION = '0.01';
 ##################################################
 
 if ( !$ENV{"GDBG_NO_FORK"} ) {
-    my $ui = dirname( $INC{"Devel/gdbg.pm"} ) . "/gdbgui.pl";
+    my $ui = dirname( $INC{"Devel/gdbg.pm"} ) . "/gdbg/gdbgui.pl";
 
     my $pid = fork();
     if ( $pid == 0 ) {
@@ -53,7 +53,7 @@ use JSON;
 use Params::Util qw<_HASH _HASH0 _HASHLIKE _ARRAYLIKE>;
 
 # shared lib for IPC between debugger and UI
-use Devel::dipc;
+use Devel::gdbg::dipc;
 
 ##################################################
 # Debugger globals
@@ -92,12 +92,12 @@ $SIG{'INT'} = "DB::dbint_handler";
 
 my $fifo_dir = $ENV{"GDBG_FIFO_DIR"} || '/tmp/';
 
-my $fifo = Devel::dipc->new();
+my $fifo = Devel::gdbg::dipc->new();
 
 $fifo->open_out("$fifo_dir/perl_debugger_fifo_out");
 $fifo->open_in("$fifo_dir/perl_debugger_fifo_in");
 
-my $rpc = Devel::dipc::RPC->new($fifo);
+my $rpc = Devel::gdbg::dipc::RPC->new($fifo);
 $rpc->cwd( getcwd() );
 $rpc->pid( $$ );
 
@@ -840,8 +840,9 @@ my %msg_handlers = (
 
 		dumpBreakpoints();
 		if(!$ENV{"GDBG_NO_FORK"}) {			
-			$fifo->close();
-			POSIX::_exit(0);
+			#$fifo->close();
+			#POSIX::_exit(0);
+			exit 0;
 		}
 	},
 	step => sub {
@@ -966,6 +967,8 @@ my %msg_handlers = (
 
 		my $file = shift;
 		my $line = shift;
+
+		return if(!$file);
 
 		if($files{$file}) {
 
@@ -1179,6 +1182,7 @@ END {
     dumpBreakpoints();
 
 	$rpc->quit();
+	$fifo->close();
 
     POSIX::_exit(0);
 }

@@ -40,9 +40,9 @@ RUN chmod a+rxs /opt/kill
 # add Perl Debugger code
 RUN mkdir -p /usr/share/perl5/Devel/
 
-COPY lib/Devel/gdbg.ui /opt
-COPY lib/Devel/gdbgui.pl /opt
-COPY lib/Devel/dipc.pm /usr/share/perl5/Devel/
+COPY lib/Devel/gdbg/gdbgui.pl /opt
+COPY lib/Devel/gdbg/gdbg.ui /opt
+COPY lib/Devel/ /usr/share/perl5/Devel/
 
 # drop root privileges
 # uid 1000 by default since 24.04
