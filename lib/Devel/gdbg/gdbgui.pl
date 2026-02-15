@@ -59,12 +59,14 @@ sub new {
 	# prepare IPC over FIRO with debugger process
 	my $fifo_dir = $ENV{"GDBG_FIFO_DIR"} || '/tmp/';
 
-    $self->{fifo} = Devel::gdbg::dipc->new();
-    $self->fifo->open_in( "$fifo_dir/perl_debugger_fifo_out");
-    $self->fifo->open_out("$fifo_dir/perl_debugger_fifo_in");
+    my $fifo = Devel::gdbg::dipc->new();
+    $fifo->open_in( "$fifo_dir/perl_debugger_fifo_out");
+    $fifo->open_out("$fifo_dir/perl_debugger_fifo_in");
+
+	$self->{fifo} = $fifo;
 
 	# high level RPC wrapper on top of $fifo
-	$self->{rpc} = Devel::gdbg::dipc::RPC->new($self->fifo);
+	$self->{rpc} = Devel::gdbg::dipc::RPC->new($fifo);
 
 	return $self;
 }
@@ -77,6 +79,7 @@ sub new {
 sub	quit :RPC {
 
 	my $self = shift;
+
 	$self->{quit} = 2;
 }
 
@@ -84,6 +87,7 @@ sub	cwd :RPC {
 	
 	my $self = shift;
 	my $cwd  = shift;
+
 	$self->view->statusBar->set_text($cwd);
 	chdir $cwd;
 }
@@ -91,6 +95,7 @@ sub	cwd :RPC {
 sub	pid :RPC {
 	
 	my $self = shift;
+
 	$self->{pid} = shift;
 }
 
@@ -141,35 +146,39 @@ sub	lexicals :RPC {
 	my $line = shift;
 	my $info = shift;
 
-	$self->view->lexicalsBuffer->set_text( $info, -1 );
-	$self->view->sourceView->set_buffer($self->view->lexicalsBuffer);
-	$self->view->status("All current lexical variables:");
+	my $view = $self->view;
+
+	$view->lexicalsBuffer->set_text( $info, -1 );
+	$view->sourceView->set_buffer($view->lexicalsBuffer);
+	$view->status("All current lexical variables:");
 }
 
 sub	jsonlexicals :RPC {
 
-	my $self = shift;
-	my $file = shift;
+	my $self   = shift;
+	my $file   = shift;
 	my $target = shift;
-	my $info = decode_json(shift);
+	my $info   = shift;
 
-	my $treemodel = $self->view->lexicalTreeView->get_model;
+	my $view = $self->view;
+
+	my $treemodel = $view->lexicalTreeView->get_model;
 	if($target eq '/') {
 		$treemodel->clear;
 	}
 
 	my $root = undef;
-	my $result = $self->view->find_root($target,$root);
+	my $result = $view->find_root($target,$root);
 	if($result->{found}) {
 		my $iter = $result->{result};
 		my $path = '';
 		if($iter) {
 			$path = $treemodel->get_value($iter,2);
 		}
-		$self->view->populate_lexicals($info,$treemodel,$self->selectedVar,$iter,$path);
+		$view->populate_lexicals($info,$treemodel,$self->selectedVar,$iter,$path);
 	}
 	else {
-		$self->view->populate_lexicals($info,$treemodel,$self->selectedVar,$root);
+		$view->populate_lexicals($info,$treemodel,$self->selectedVar,$root);
 	}
 }
 
@@ -178,20 +187,25 @@ sub	breakpoints :RPC {
 	my $self = shift;
 	my $info = shift;
 
-	$self->view->breakpointsBuffer->set_text( $info, -1 );
-	$self->view->sourceView->set_buffer($self->view->breakpointsBuffer);
-	$self->view->status("All breakpoints currently set:");
+	my $view = $self->view;
+
+	$view->breakpointsBuffer->set_text( $info, -1 );
+	$view->sourceView->set_buffer($view->breakpointsBuffer);
+	$view->status("All breakpoints currently set:");
 }
 
 sub	setbreakpoints :RPC {
 	# set breakpoints for file
 
-	my $self = shift;
+	my $self  = shift;
 	my $file  = shift;
 	my $lines = shift;
+
+	my $view = $self->view;
+
 	my @lines = split ',' , $lines;
 
-	my $buf = $self->view->sourceBuffers->{$file};
+	my $buf = $view->sourceBuffers->{$file};
 	if(!$buf) {
 		return;
 	}
@@ -205,7 +219,7 @@ sub	setbreakpoints :RPC {
 
 		my $bpn = $file . ":" . $line;
 		my $iter = $buf->get_iter_at_line( $line - 1 );
-		$self->view->sourceBuffers->{$file}->create_source_mark( $bpn, "error", $iter );
+		$buf->create_source_mark( $bpn, "error", $iter );
 	}
 }
 
@@ -216,6 +230,7 @@ sub	load :RPC {
 	my $file = shift;
 	my $line = shift;
 	my $src  = shift;
+
 	$self->view->statusBar->set_text("$file");
 
 	$self->{files}->{$file} = $src;
@@ -227,8 +242,11 @@ sub	eval :RPC {
 
 	my $self = shift;
 	my $evaled = shift // '<undef>';
-	$self->view->lexicalsBuffer->set_text( $evaled, -1 );
-	$self->view->sourceView->set_buffer($self->view->lexicalsBuffer);
+
+	my $view = $self->view;
+
+	$view->lexicalsBuffer->set_text( $evaled, -1 );
+	$view->sourceView->set_buffer($view->lexicalsBuffer);
 }
 
 sub	subs :RPC {
@@ -236,10 +254,12 @@ sub	subs :RPC {
 
 	my $self = shift;
 	my $subs = shift;
+
+	my $view = $self->view;
 	
-	$self->view->subsBuffer->set_text( $subs, -1 );
-	$self->view->sourceView->set_buffer($self->view->subsBuffer);
-	$self->view->status("All subroutines loaded:");
+	$view->subsBuffer->set_text( $subs, -1 );
+	$view->sourceView->set_buffer($view->subsBuffer);
+	$view->status("All subroutines loaded:");
 }
 
 #----------------------------------
@@ -253,42 +273,48 @@ sub openFile {
     my $filename = shift;
     my $line     = shift;
 
-    $self->view->status( $filename, $line );	
+	my $view = $self->view;
 
-	$self->view->pump_msgs();
+    $view->status( $filename, $line );	
+
+	$view->pump_msgs();
 
     $self->{openFile} = $filename;
 
 	# if we already have a source buffer for this file
-    if ( $self->view->sourceBuffers->{$filename} ) {
+    if ( $view->sourceBuffers->{$filename} ) {
 
         # file already exists!
-        $self->view->sourceView->set_buffer( $self->view->sourceBuffers->{$filename} );
+        $view->sourceView->set_buffer( 
+			$view->sourceBuffers->{$filename} 
+		);
 
 		# if we have the source
 		if($self->files->{$filename}) {
 
 			# has it changed from display?
-			my $txt = $self->view->getSource($filename);
+			my $txt = $view->getSource($filename);
 			if(  $txt ne $self->files->{$filename} ) {
 
-				$self->view->sourceBuffers->{$filename}->set_text( $self->files->{$filename}, -1 );
+				$view->sourceBuffers->{$filename}->set_text( 
+					$self->files->{$filename}, -1 
+				);
 			}
 		}
-		$self->view->sourcesCombo->set_active_id($filename);
+		$view->sourcesCombo->set_active_id($filename);
         return;
     }
 
 	# create new source buffer
 	my $buf = $self->loadBuffer($filename,$line);
 
-	$self->view->pump_msgs();
+	$view->pump_msgs();
 
     # set the new buffer as current buffer for display
-    $self->view->sourceView->set_buffer($buf);
-	$self->view->sourcesCombo->set_active_id($filename);
+    $view->sourceView->set_buffer($buf);
+	$view->sourcesCombo->set_active_id($filename);
 
-	$self->view->pump_msgs();
+	$view->pump_msgs();
 
 	$self->rpc->getbreakpoints($filename);
 }
@@ -299,6 +325,8 @@ sub loadBuffer {
 	my $self = shift;
 	my $file = shift;
 	my $line = shift || 1;
+
+	my $view = $self->view;
 
 	# get the content
 	my $content = $self->files->{$file};
@@ -318,11 +346,11 @@ sub loadBuffer {
 	if ($content) {
 		$buf->set_text( $content, -1 );
 	}
-	$self->view->sourceBuffers->{$file} = $buf;
+	$view->sourceBuffers->{$file} = $buf;
 
 	# add file to combo box
-	$self->view->sourcesCombo->append($file,$file);
-	$self->view->sourcesCombo->set_active_id($file);
+	$view->sourcesCombo->append($file,$file);
+	$view->sourcesCombo->set_active_id($file);
 
 	return $buf;
 }
@@ -334,18 +362,22 @@ sub scroll {
 	my $file = shift;
     my $line = shift;
 
+	my $view = $self->view;
+
     $self->openFile( $file, $line );
 
-	$self->view->pump_msgs();
+	$view->pump_msgs();
 
-    my $iter = $self->view->sourceBuffers->{$file}->get_iter_at_line( $line - 1 );
-    $self->view->sourceView->scroll_to_iter( $iter, 0, 1, 0, 0.5 );
+	my $buf = $view->sourceBuffers->{$file};
 
-	$self->view->pump_msgs();
+    my $iter = $buf->get_iter_at_line( $line - 1 );
+    $view->sourceView->scroll_to_iter( $iter, 0, 1, 0, 0.5 );
 
-    $self->view->sourceBuffers->{$file}->place_cursor($iter);
+	$view->pump_msgs();
 
-	$self->view->pump_msgs();
+    $buf->place_cursor($iter);
+
+	$view->pump_msgs();
 }
 
 
@@ -355,23 +387,25 @@ sub enableButtons {
 	my $self  = shift;
     my $state = shift;
 
+	my $view = $self->view;
+
 	$self->{uiDisabled} = $state ? 0 : 1;
 
-    $self->view->buttonRun->set_sensitive($state);
-    $self->view->buttonStep->set_sensitive($state);
-    $self->view->buttonOver->set_sensitive($state);
-    $self->view->buttonOut->set_sensitive($state);
-    $self->view->buttonLexicals->set_sensitive($state);
-    $self->view->buttonHome->set_sensitive($state);
-    $self->view->evalEntry->set_sensitive($state);
-    $self->view->lexicalsMenu->set_sensitive($state);
-    $self->view->breakpointsMenu->set_sensitive($state);
-    $self->view->openFileMenu->set_sensitive($state);
-    $self->view->showSubsMenu->set_sensitive($state);
-    $self->view->showFilesMenu->set_sensitive($state);
-    $self->view->lexicalTreeView->set_sensitive($state);
+    $view->buttonRun->set_sensitive($state);
+    $view->buttonStep->set_sensitive($state);
+    $view->buttonOver->set_sensitive($state);
+    $view->buttonOut->set_sensitive($state);
+    $view->buttonLexicals->set_sensitive($state);
+    $view->buttonHome->set_sensitive($state);
+    $view->evalEntry->set_sensitive($state);
+    $view->lexicalsMenu->set_sensitive($state);
+    $view->breakpointsMenu->set_sensitive($state);
+    $view->openFileMenu->set_sensitive($state);
+    $view->showSubsMenu->set_sensitive($state);
+    $view->showFilesMenu->set_sensitive($state);
+    $view->lexicalTreeView->set_sensitive($state);
 
-    $self->view->buttonStop->set_sensitive( $state ? 0 : 1 );
+    $view->buttonStop->set_sensitive( $state ? 0 : 1 );
 }
 
 ##########################################
@@ -463,7 +497,7 @@ sub getLineFromMouseClick {
 	$iter->backward_line();
 
 	# the line source text
-	my $text = getLine($iter,$widget->get_buffer(),$line);
+	my $text = $self->getLine($iter,$widget->get_buffer(),$line);
 
 	return $text;
 }
@@ -780,7 +814,8 @@ sub build_ui {
 
 	$self->lexicalTreeView->signal_connect( 
 		'row-expanded' => sub {
-			return $controller->onRowExpanded(@_)
+
+			return $controller->onRowExpanded(@_);
 		}
 	);
 
@@ -815,13 +850,12 @@ use parent 'Devel::gdbg::controller';
 
 sub new {
 	my $class = shift;
-
-	my $view  = view->new();
-	my $model = model->new($view);
+	my $model = shift;
+	my $view  = shift;
 
 	my $self = {
-		view  => $view,
 		model => $model,
+		view  => $view,
 	};
 
 	bless $self, $class;
@@ -848,50 +882,66 @@ sub model {
 
 # run command - continue until next breakpoint
 sub onRun :Action {
+
 	my $self = shift;
-	$self->model->rpc->continue();
-    $self->model->enableButtons(0);
+
+	my $model = $self->model;
+
+	$model->rpc->continue();
+    $model->enableButtons(0);
 }
 
 # single step, recursing into functions
 sub onStep :Action :Accel(<ctrl>Right) {
 
 	my $self = shift;
-	$self->model->rpc->step();
-    $self->model->enableButtons(0);
+
+	my $model = $self->model;
+
+	$model->rpc->step();
+    $model->enableButtons(0);
 }
 
 # single step, jumping over functions
 sub onOver :Action :Accel(<ctrl>Down) {
 
 	my $self = shift;
-	$self->model->rpc->next();
-    $self->model->enableButtons(0);
+
+	my $model = $self->model;
+
+	$model->rpc->next();
+    $model->enableButtons(0);
 }
 
 # step out of current function, continue stepping afterwards
 sub onOut :Action :Accel(<ctrl>Left) {
 
 	my $self = shift;
-	$self->model->rpc->return();	
-    $self->model->enableButtons(0);
+
+	my $model = $self->model;
+
+	$model->rpc->return();	
+    $model->enableButtons(0);
 }
 
 # stop button pressed - interrupt the debugger
 sub onStop :Action {
 
 	my $self = shift;
+
+	my $model = $self->model;
+
     #	print "KILL $pid\n";
 	if(!$ENV{"GDBG_KILL_CMD"}) {
 
-	    kill 'INT', $self->model->pid;
+	    kill 'INT', $model->pid;
 	}
 	else {
 		my $cmd = $ENV{"GDBG_KILL_CMD"};
 
 		# if $cmd contains the string '{{PID}}',
 		# replace with current $pid
-		my $pid = $self->model->pid;
+		my $pid = $model->pid;
 		$cmd =~ s/\{\{PID\}\}/$pid/;
 
 		system("bash -c '$cmd'");
@@ -903,8 +953,11 @@ sub onEval :Action {
 
 	my $self = shift;
 
-    my $e = $self->view->evalEntry->get_text();
-	$self->model->rpc->eval( $e );
+	my $model = $self->model;
+	my $view  = $self->view;
+
+    my $e = $view->evalEntry->get_text();
+	$model->rpc->eval( $e );
 }
 
 
@@ -915,10 +968,13 @@ sub onOpen :Action {
 	my $action = shift;
 	my $param  = shift;
 
+	my $model = $self->model;
+	my $view  = $self->view;
+
     # show open file dialog
     my $dlg = Gtk3::FileChooserNative->new( 
 		"Open File", 
-		$self->view->mainWindow, 
+		$view->mainWindow, 
 		'open',
         "OK", 
 		"Cancel" 
@@ -928,7 +984,7 @@ sub onOpen :Action {
     if ( $r == -3 ) {    # accept file
 
         my $fn = $dlg->get_filename();
-        $self->model->openFile($fn);
+        $model->openFile($fn);
     }
 }
 
@@ -937,9 +993,11 @@ sub onScroll :Action {
 
 	my $self = shift;
 
-    $self->model->scroll(
-		$self->model->currentFile,
-		$self->model->currentLine
+	my $model = $self->model;
+
+    $model->scroll(
+		$model->currentFile,
+		$model->currentLine
 	);
 }
 
@@ -948,7 +1006,9 @@ sub onLexicals :Action {
 
 	my $self = shift;
 
-	$self->model->rpc->lexicals();
+	my $model = $self->model;
+
+	$model->rpc->lexicals();
 }
 
 # show breakpoints window menu handler
@@ -956,14 +1016,18 @@ sub onBreakpoints :Action {
 
 	my $self = shift;
 
-	$self->model->rpc->breakpoints();
+	my $model = $self->model;
+
+	$model->rpc->breakpoints();
 }
 
 sub onStoreBreakpoints :Action {
 
 	my $self = shift;
 
-	$self->model->rpc->storebreakpoints();
+	my $model = $self->model;
+
+	$model->rpc->storebreakpoints();
 }
 
 # show subroutines window menu handler
@@ -971,20 +1035,23 @@ sub onSubs :Action {
 
 	my $self = shift;
 
-	$self->model->rpc->functions();	
+	my $model = $self->model;
+
+	$model->rpc->functions();	
 }
 
 # reload the current, active file, if any
 sub onReload :Action {
 
-	my $self = shift;
-
+	my $self   = shift;
 	my $widget = shift;
-	my $event = shift;
+	my $event  = shift;
 
-	$self->model->rpc->fetch(
-		$self->model->currentFile,
-		$self->model->currentLine
+	my $model = $self->model;
+
+	$model->rpc->fetch(
+		$model->currentFile,
+		$model->currentLine
 	);	
 }
 
@@ -993,14 +1060,17 @@ sub onFiles :Action {
 
 	my $self = shift;
 
-	my @files = keys $self->model->files->%*;
+	my $model = $self->model;
+	my $view  = $self->view;
+
+	my @files = keys $model->files->%*;
 	my @sorted = sort(@files);
 	my $text = join("\n", @sorted);
 
-	$self->view->filesBuffer->set_text($text,-1);
+	$view->filesBuffer->set_text($text,-1);
 
-	$self->view->sourceView->set_buffer($self->view->filesBuffer);
-	$self->view->status("Files loaded by the debugger:");
+	$view->sourceView->set_buffer($view->filesBuffer);
+	$view->status("Files loaded by the debugger:");
 }
 
 #-------------------------------------------------
@@ -1009,37 +1079,42 @@ sub onFiles :Action {
 
 # set a breakpoint UI handler (click on marker of sourceView)
 sub onMarker {
+
     my ( $self, $widget, $iter, $event ) = @_;
 
+	my $model = $self->model;
+	my $view  = $self->view;
+
 	# only allow setting breakpoints when interactive
-	if($self->model->uiDisabled) {
+	if($model->uiDisabled) {
 		return;
 	}
 
 	my $buf = $self->view->sourceView->get_buffer();
 
 	# if we are not looking at a source file, no breaktpoints
-	if( $buf == $self->view->subsBuffer ||
-		$buf == $self->view->infoBuffer ||
-		$buf == $self->view->breakpointsBuffer ||
-		$buf == $self->view->filesBuffer) 
+	if( $buf == $view->subsBuffer ||
+		$buf == $view->infoBuffer ||
+		$buf == $view->breakpointsBuffer ||
+		$buf == $view->filesBuffer) 
 	{
 		return;
 	}
 
 	# get line and filename
     my $line = $iter->get_line() + 1;
-    my $self->model->{filename} = $self->model->{openFile};
+
+    $model->{filename} = $model->{openFile};
 
     # cannot set break points in eval code
-    if ( $self->model->filename =~ /^\(eval/ ) {
+    if ( $model->filename =~ /^\(eval/ ) {
         return;
     }
 
 	# get line of text, skip over some obviously non-breakable lines
-	my $text = getLine(
+	my $text = $view->getLine(
 		$iter,
-		$self->view->sourceBuffers->{$self->model->filename},
+		$view->sourceBuffers->{$model->filename},
 		$line
 	);
 	if( !$text || $text eq "" || 
@@ -1049,8 +1124,8 @@ sub onMarker {
 		return;
 	}
 
-	$self->model->rpc->breakpoint(
-		$self->model->filename,
+	$model->rpc->breakpoint(
+		$model->filename,
 		$line
 	);
 }
@@ -1060,34 +1135,37 @@ sub onToggleBreakpoint :Accel(<ctrl>BackSpace) {
 
 	my $self = shift;
 
-	if($self->model->uiDisabled) {
+	my $model = $self->model;
+	my $view  = $self->view;
+
+	if($model->uiDisabled) {
 		return;
 	}
 
-	my $buf = $self->view->sourceView->get_buffer();
+	my $buf = $view->sourceView->get_buffer();
 
 	# if we are not looking at a source file, no breaktpoints
-	if( $buf == $self->view->subsBuffer ||
-		$buf == $self->view->infoBuffer ||
-		$buf == $self->view->breakpointsBuffer ||
-		$buf == $self->view->filesBuffer) 
+	if( $buf == $view->subsBuffer ||
+		$buf == $view->infoBuffer ||
+		$buf == $view->breakpointsBuffer ||
+		$buf == $view->filesBuffer) 
 	{
 		return;
 	}
 
     # cannot set break points in eval code
-    if ( $self->model->currentFile =~ /^\(eval/ ) {
+    if ( $model->currentFile =~ /^\(eval/ ) {
         return;
     }
 
-	my $mark = $self->view->sourceView->get_buffer()->get_insert();
-	my $iter = $self->view->sourceView->get_buffer()->get_iter_at_mark($mark);
+	my $mark = $view->sourceView->get_buffer()->get_insert();
+	my $iter = $view->sourceView->get_buffer()->get_iter_at_mark($mark);
 	my $line = $iter->get_line()+1;
 
 	# get line of text, skip over some obviously non-breakable lines
-	my $text = $self->view->getLine(
+	my $text = $view->getLine(
 		$iter,
-		$self->view->sourceBuffers->{$self->model->currentFile},
+		$view->sourceBuffers->{$model->currentFile},
 		$line
 	);
 	if( !$text || $text eq "" || 
@@ -1097,8 +1175,8 @@ sub onToggleBreakpoint :Accel(<ctrl>BackSpace) {
 		return;
 	}
 
-	$self->model->rpc->breakpoint(
-		$self->model->currentFile,
+	$model->rpc->breakpoint(
+		$model->currentFile,
 		$line
 	);
 }
@@ -1108,7 +1186,9 @@ sub onToggleRunning :Accel(<ctrl>space) {
 
 	my $self = shift;
 
-	if($self->model->uiDisabled) {
+	my $model = $self->model;
+
+	if($model->uiDisabled) {
 
 		onStop();
 	}
@@ -1125,16 +1205,19 @@ sub onInfoPaneClick {
 	my $widget = shift;
 	my $event  = shift;
 
-	if($self->model->uiDisabled) {
+	my $model = $self->model;
+	my $view  = $self->view;
+
+	if($model->uiDisabled) {
 		return;
 	}
 
-	my $text = $self->view->getLineFromMouseClick($widget,$event);
+	my $text = $view->getLineFromMouseClick($widget,$event);
 	if( $text =~ /[^\[]+\[([^\[]+):([0-9]+)\]/ ) {
 
 		my $file = $1;
 		my $line = $2;
-		$self->model->scroll($file,$line);
+		$model->scroll($file,$line);
 	}
 }
 
@@ -1146,35 +1229,38 @@ sub onClick {
 	my $widget = shift;
 	my $event  = shift;
 
-	if($self->model->uiDisabled) {
+	my $model = $self->model;
+	my $view  = $self->view;
+
+	if($model->uiDisabled) {
 		return;
 	}
 
-	my $text = $self->view->getLineFromMouseClick($widget,$event);
+	my $text = $view->getLineFromMouseClick($widget,$event);
 	if(!$text) { 
 		return; 
 	}
 
-	my $buf = $self->view->sourceView->get_buffer();
+	my $buf = $view->sourceView->get_buffer();
 
-	if($buf == $self->view->subsBuffer) {
+	if($buf == $view->subsBuffer) {
 
-		$self->model->rpc->functionbreak($text);
+		$model->rpc->functionbreak($text);
 		return;
 	}
-	elsif($buf == $self->view->breakpointsBuffer) {
+	elsif($buf == $view->breakpointsBuffer) {
 
 		if ( $text =~ /^#/) { return; }
 		if ($text =~ /([^:]+):([0-9]+)/ ) {
 			my $file = $1;
 			my $line = $2;
-			$self->model->scroll($file,$line);
+			$model->scroll($file,$line);
 		}
 		return;
 	}
-	elsif($buf == $self->view->filesBuffer) {
+	elsif($buf == $view->filesBuffer) {
 
-		$self->model->openFile($text,1);
+		$model->openFile($text,1);
 		return;
 	}
 }
@@ -1186,9 +1272,12 @@ sub onRowExpanded {
 	my $widget = shift;
 	my $iter   = shift;
 
-	my $treemodel = $self->view->lexicalTreeView->get_model();
+	my $model = $self->model;
+	my $view  = $self->view;
+
+	my $treemodel = $view->lexicalTreeView->get_model();
 	my $gval = $treemodel->get_value($iter,2); 
-	$self->model->{selectedVar} = $gval;
+	$model->{selectedVar} = $gval;
 
 	my $first = $treemodel->iter_children($iter);
 	$gval = $treemodel->get_value($first,0); 
@@ -1199,7 +1288,7 @@ sub onRowExpanded {
 
 			$gval = $treemodel->get_value($iter,2); 
 			$treemodel->remove($first);
-			$self->model->rpc->jsonlexicals( $gval );
+			$model->rpc->jsonlexicals( $gval );
 		}
 	}
 }
@@ -1208,23 +1297,26 @@ sub onRowExpanded {
 sub onTheme {
 	
     my ($self,$menuItem) = @_;
+
+	my $model = $self->model;
+	my $view  = $self->view;
     my $label = $menuItem->get_label();
 
     my $manager = Gtk::Source::StyleSchemeManager::get_default();
-    $self->view->{widgets}->{scheme} = $manager->get_scheme($label);
+    $view->{widgets}->{scheme} = $manager->get_scheme($label);
 
-    foreach my $key ( keys $self->view->sourceBuffers()->%* ) {
+    foreach my $key ( keys $view->sourceBuffers()->%* ) {
 
-        $self->view->sourceBuffers->{$key}->set_style_scheme(
-			$self->view->scheme
+        $view->sourceBuffers->{$key}->set_style_scheme(
+			$view->scheme
 		);
     }
 	
-	$self->view->infoBuffer->set_style_scheme($self->view->scheme);        
-	$self->view->lexicalsBuffer->set_style_scheme($self->view->scheme);    
-	$self->view->subsBuffer->set_style_scheme($self->view->scheme);		
-	$self->view->filesBuffer->set_style_scheme($self->view->scheme);	   
-	$self->view->breakpointsBuffer->set_style_scheme($self->view->scheme); 
+	$view->infoBuffer->set_style_scheme($view->scheme);        
+	$view->lexicalsBuffer->set_style_scheme($view->scheme);    
+	$view->subsBuffer->set_style_scheme($view->scheme);		
+	$view->filesBuffer->set_style_scheme($view->scheme);	   
+	$view->breakpointsBuffer->set_style_scheme($view->scheme); 
 }
 
 # user selects source from combo box
@@ -1232,16 +1324,19 @@ sub onFileChoose {
 
 	my $self = shift;
 
-	my $file = $self->view->sourcesCombo->get_active_text();
+	my $model = $self->model;
+	my $view  = $self->view;
 
-    $self->model->{openFile} = $file;
+	my $file = $view->sourcesCombo->get_active_text();
 
-    $self->view->sourceView->set_buffer( 
-		$self->view->sourceBuffers->{$self->model->{openFile}} 
+    $model->{openFile} = $file;
+
+    $view->sourceView->set_buffer( 
+		$view->sourceBuffers->{$model->{openFile}} 
 	);
 
-    $self->view->status( 
-		$self->model->{openFile}
+    $view->status( 
+		$model->{openFile}
 	);
 }
 
@@ -1250,7 +1345,9 @@ sub onDestroy {
 
 	my $self = shift;
 
-    $self->model->{quit} = 1;
+	my $model = $self->model;
+
+    $model->{quit} = 1;
 }
 
 ##################################################
@@ -1277,7 +1374,10 @@ sub doSearch {
 
 	my $self   = shift;
 	my $widget = shift;
-	my $event   = shift;
+	my $event  = shift;
+
+	my $model = $self->model;
+	my $view  = $self->view;
 
 	# check for shift key being pressed
 	my ($unused,$state) = $event->get_state();
@@ -1295,57 +1395,57 @@ sub doSearch {
 	# right click
 	if($event->button->{button} == 3) {
 
-		my $dialog = $self->view->searchDialog;
+		my $dialog = $view->searchDialog;
 
-		my $active = $self->model->searchDirection eq 'forward' ? 1 : 0;
-		$self->view->searchForward->set_active($active);
-		$self->view->searchBackward->set_active(!$active);
+		my $active = $model->searchDirection() eq 'forward' ? 1 : 0;
+		$view->searchForward->set_active($active);
+		$view->searchBackward->set_active(!$active);
 
-		$dialog->set_transient_for($self->view->mainWindow);
+		$dialog->set_transient_for($view->mainWindow);
 		$dialog->set_modal(1);
 		$dialog->show_all;
 
 		return 0;
 	}
 
-	my $query = $self->view->search->get_text();
+	my $query = $view->search->get_text();
 
-	$self->view->searchSettings->set_search_text($query);
+	$view->searchSettings->set_search_text($query);
 
-	$self->view->{widgets}->{searchCtx} = Gtk::Source::SearchContext->new(
-		$self->view->sourceView->get_buffer(),
-		$self->view->searchSettings,
+	$view->{widgets}->{searchCtx} = Gtk::Source::SearchContext->new(
+		$view->sourceView->get_buffer(),
+		$view->searchSettings,
 	);
 
-	$self->view->searchCtx->set_highlight(1);
+	$view->searchCtx->set_highlight(1);
 
-	my ($hasSelection,$startIter,$endIter) = $self->view->sourceView->get_buffer()->get_selection_bounds();
-	my ($match,$matchStart, $matchEnd) ;
+	my ($hasSelection,$startIter,$endIter) = $view->sourceView->get_buffer()->get_selection_bounds();
+	my ($match,$matchStart, $matchEnd);
 
 	my $direction = $isShift 
-		? $self->model->searchDirection == 'forward' ? 'backward' : 'forward'   
-		: $self->model->searchDirection;
+		? $model->searchDirection() == 'forward' ? 'backward' : 'forward'   
+		: $model->searchDirection();
 
-	$self->model->{searchDirection} = $direction;
+	$model->{searchDirection} = $direction;
 
 	if($direction eq 'forward' ) {
 
 		my $searchIter = $endIter;	
 		$searchIter->forward_char();
 
-		($match,$matchStart, $matchEnd) = $self->view->searchCtx->forward($searchIter);
+		($match,$matchStart, $matchEnd) = $view->searchCtx->forward($searchIter);
 	}
 	else {
 		my $searchIter = $startIter;	
-		($match,$matchStart, $matchEnd) = $self->view->searchCtx->backward($searchIter);
+		($match,$matchStart, $matchEnd) = $view->searchCtx->backward($searchIter);
 	}
 
 	if($match) {
 
-		my $buf = $self->view->sourceView->get_buffer();
+		my $buf = $view->sourceView->get_buffer();
 		$buf->select_range($matchStart,$matchEnd);
 
-		$self->view->sourceView->scroll_to_iter( $matchStart, 0, 1, 0.5, 0.5 );		
+		$view->sourceView->scroll_to_iter( $matchStart, 0, 1, 0.5, 0.5 );		
 	}
 
 	return 1;
@@ -1357,6 +1457,9 @@ sub onCancelSearch {
 	my $widget = shift;
 	my $event  = shift;
 
+	my $model = $self->model;
+	my $view  = $self->view;
+
 	my $img = $widget->get_property("image");
 
 	if($event->button->{type} eq 'button-press') {
@@ -1364,23 +1467,23 @@ sub onCancelSearch {
 		# left click
 		if($event->button->{button} == 1) {
 
-			if($self->view->searchCtx) {
+			if($view->searchCtx) {
 
-				$self->view->searchCtx->set_highlight(0);
+				$view->searchCtx->set_highlight(0);
 			}
 
-			$self->view->search->set_text("");
+			$view->search->set_text("");
 		}
 		# right click
 		if($event->button->{button} == 3) {
 
-			my $dialog = $self->view->searchDialog;
+			my $dialog = $view->searchDialog;
 
-			my $active = $self->model->searchDirection eq 'forward' ? 1 : 0;
-			$self->view->searchForward->set_active($active);
-			$self->view->searchBackward->set_active(!$active);
+			my $active = $model->searchDirection() eq 'forward' ? 1 : 0;
+			$view->searchForward->set_active($active);
+			$view->searchBackward->set_active(!$active);
 
-			$dialog->set_transient_for($self->view->mainWindow);
+			$dialog->set_transient_for($view->mainWindow);
 			$dialog->set_modal(1);
 			$dialog->show_all;
 		}
@@ -1390,7 +1493,10 @@ sub onCancelSearch {
 sub onFocusSearch :Accel(<ctrl>f) {
 
 	my $self = shift;
-	$self->view->search->grab_focus();
+
+	my $view = $self->view;
+
+	$view->search->grab_focus();
 }
 
 # search settings dialog events
@@ -1419,7 +1525,9 @@ sub onSearchBackward {
 	my $widget = shift;
 	my $event   = shift;
 
-	$self->model->{searchDirection} = 'backward';
+	my $model = $self->model;
+
+	$model->{searchDirection} = 'backward';
 }
 
 sub onSearchForward {
@@ -1428,7 +1536,9 @@ sub onSearchForward {
 	my $widget = shift;
 	my $event  = shift;
 
-	$self->model->{searchDirection} = 'forward';
+	my $model = $self->model;
+
+	$model->{searchDirection} = 'forward';
 }
 
 sub onSearchSensitive {
@@ -1437,8 +1547,10 @@ sub onSearchSensitive {
 	my $widget = shift;
 	my $event  = shift;
 
+	my $view  = $self->view;
+
 	my $value = $widget->get_active;
-	$self->view->searchSettings->set_case_sensitive($value);
+	$view->searchSettings->set_case_sensitive($value);
 }
 
 sub onSearchWordBoundaries {
@@ -1447,8 +1559,10 @@ sub onSearchWordBoundaries {
 	my $widget = shift;
 	my $event  = shift;
 
+	my $view  = $self->view;
+
 	my $value = $widget->get_active;
-	$self->view->searchSettings->set_at_word_boundaries($value);
+	$view->searchSettings->set_at_word_boundaries($value);
 }
 
 sub onSearchRegexEnabled {
@@ -1457,8 +1571,10 @@ sub onSearchRegexEnabled {
 	my $widget = shift;
 	my $event  = shift;
 
+	my $view  = $self->view;
+
 	my $value = $widget->get_active;
-	$self->view->searchSettings->set_regex_enabled($value);
+	$view->searchSettings->set_regex_enabled($value);
 }
 
 
@@ -1470,14 +1586,16 @@ package gdbgui;
 
 # initialize the app
 
-my $controller = controller->new();
+my $view       = view->new();
+my $model      = model->new($view);
+my $controller = controller->new($model,$view);
 
 if ( $ENV{"GDBG_NO_FORK"} ) {
 
 	# possibly re-attaching the debugger UI to
 	# the process being debugged. 
 	$controller->onStop();		
-	$controller->model->rpc->next();
+	$model->rpc->next();
 }
 
 #-------------------------------------------------
@@ -1487,20 +1605,20 @@ if ( $ENV{"GDBG_NO_FORK"} ) {
 # run the main event loop, handling both
 # Gtk and IPC fifo events
 
-$controller->view->run($controller->model);
+$view->run($model);
 
 
 #-------------------------------------------------
 # over and out
 #-------------------------------------------------
 
-if ( $controller->model->{quit} == 1 ) 
+if ( $model->{quit} == 1 ) 
 {
 	if(!$ENV{"GDBG_KILL_CMD"}) {
-    	kill 'INT', $controller->model->{pid};
+    	kill 'INT', $model->{pid};
 	}
-	$controller->model->rpc->quit();
+	$model->rpc->quit();
 }
 
-$controller->model->fifo->close();
+$model->fifo->close();
 

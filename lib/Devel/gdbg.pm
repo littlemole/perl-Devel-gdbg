@@ -178,7 +178,6 @@ sub find_module {
         return getcwd() . "/$module.pl";
     }
 
-
     return $fun;
 }
 
@@ -911,11 +910,7 @@ my %msg_handlers = (
 			$data = expand_lex($result,'');
 		}
 
-		my $json = JSON->new()->allow_blessed()->allow_unknown();
-		my $info = $json->utf8->encode($data);
-		my $msg = $currentFile . ",/" . $target . "," . $info;
-
-		$rpc->jsonlexicals( $currentFile, "/$target", $info );
+		$rpc->jsonlexicals( $currentFile, "/$target", $data );
 	},
 	breakpoint => sub {
 		my $file = shift;
