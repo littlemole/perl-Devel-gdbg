@@ -8,7 +8,7 @@
 /*
 This is a setuod executable.
 
-- do not take any user inout
+- do not take any user input
 - do not make it writeable
 */
 

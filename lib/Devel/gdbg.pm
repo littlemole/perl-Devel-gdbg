@@ -314,7 +314,7 @@ sub deleteBreakpoint {
 
 # helper to set a postponed breakpoint
 # after source file was loaded by perl
-sub setPotponedBreakpoints {
+sub setPostponedBreakpoints {
 
 	my $file = shift;
 
@@ -1053,7 +1053,7 @@ sub DB {
 			# if we now! have source data for this file
 			if( hasdblines($key) ) {
 
-				setPotponedBreakpoints($key);
+				setPostponedBreakpoints($key);
 			}
         }
 
@@ -1160,7 +1160,7 @@ sub postponed {
 
         if ( $postpone{$path} ) {
 
-			setPotponedBreakpoints($path);
+			setPostponedBreakpoints($path);
         }
     }
 }

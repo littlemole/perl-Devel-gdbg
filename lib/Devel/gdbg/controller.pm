@@ -18,6 +18,14 @@ our %simpleActions;
 our %detailedActions;
 our @accels;
 
+# the convention is that a controller subclass 
+# has properties 'view' and 'model'
+sub run {
+	my $self = shift;
+
+	return $self->{view}->run( $self->{model} );
+}
+
 ##################################################
 # support for sub metadata attributes
 ##################################################

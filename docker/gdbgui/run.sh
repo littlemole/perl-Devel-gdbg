@@ -12,6 +12,4 @@ startxfce4 &
 sleep 1
 /usr/share/novnc/utils/novnc_proxy --vnc "127.0.0.1:$VNC_PORT" --listen "0.0.0.0:$NOVNC_PORT" &
 sleep 1
-#ls -lah /opt/
-#/usr/bin/perl /opt/ui.pl &
 perl /opt/gdbgui.pl

@@ -11,27 +11,24 @@ use strict;
 # Perl dependencies
 ##################################################
 
-use JSON;
-use Data::Dumper;
-use File::Basename;
-use FindBin qw( $RealBin );
-
 # IPC package share with debugger
 use Devel::gdbg::dipc;
 
+##################################################
 # supress some GLib warnings
+##################################################
+
 #local *STDERR;
 #open( STDERR, '>', '/dev/null' ) or die $!;
 
 
 ##################################################
-# MVC - Debugger Model
+# MVC - Debugger UI Application Model
 ##################################################
 
 package model;
-use JSON;
-use File::Basename;
 use parent 'Devel::gdbg::model';
+use strict;
 
 sub new {
 
@@ -408,16 +405,18 @@ sub enableButtons {
     $view->buttonStop->set_sensitive( $state ? 0 : 1 );
 }
 
+
 ##########################################
-# MVC- Debugger View
+# MVC- Debugger UI View
 ##########################################
 
 package view;
+use parent 'Devel::gdbg::view';
+use strict;
+
 use File::Basename;
 use Params::Util qw<_HASH _HASH0 _HASHLIKE _ARRAYLIKE>;
 use FindBin qw( $RealBin );
-
-use parent 'Devel::gdbg::view';
 
 sub new {
 
@@ -512,14 +511,15 @@ sub updateInfo {
     $self->infoBuffer->set_text( $info, -1 );
 }
 
-##################################################
+#-------------------------------------------------
 # variable inspector tree widget support
-##################################################
+#-------------------------------------------------
 
 # find a node '$target' in the var inspection tree
 # returning a Gtk TreeWidget iterator
 
 sub find_root {
+
 	my ($self,$target,$root) = @_;
 
 	if($target eq '' || $target eq '/') {
@@ -671,6 +671,10 @@ sub populate_lexicals {
 	}
 }
 
+#-------------------------------------------------
+# set status helper
+#-------------------------------------------------
+
 sub status {
 
 	my $self     = shift;
@@ -693,8 +697,10 @@ sub status {
 	}
 }
 
+#-------------------------------------------------
 # initialize the UI from xml
-# and add some custom widgets at runtime
+# and add our widget customizations
+#-------------------------------------------------
 
 sub build_ui {
 
@@ -828,25 +834,21 @@ sub build_ui {
 	$searchSettings->set_case_sensitive(0);
 	$self->add( searchSettings => $searchSettings );
 	
-	# set everything to disabled on startup
-
 	# enable button stop, just to be sure
-    $self->buttonStop->set_sensitive(1);
+    #$self->buttonStop->set_sensitive(1);
 
     # show the UI
     $self->mainWindow->show_all();
 }
+
 
 ##################################################
 # MVC - Debugger UI Controller
 ##################################################
 
 package controller;
-
-use strict;
-use JSON;
-use File::Basename;
 use parent 'Devel::gdbg::controller';
+use strict;
 
 sub new {
 	my $class = shift;
@@ -1221,7 +1223,6 @@ sub onInfoPaneClick {
 	}
 }
 
-
 # mouse click on a line, if on breakpoints, files or subroutines view
 sub onClick {
 
@@ -1350,9 +1351,9 @@ sub onDestroy {
     $model->{quit} = 1;
 }
 
-##################################################
+#-------------------------------------------------
 # UI search support
-##################################################
+#-------------------------------------------------
 
 sub onSearch {
 
@@ -1499,7 +1500,9 @@ sub onFocusSearch :Accel(<ctrl>f) {
 	$view->search->grab_focus();
 }
 
+#-------------------------------------------------
 # search settings dialog events
+#-------------------------------------------------
 
 sub onSearchDialogClose {
 
@@ -1605,7 +1608,7 @@ if ( $ENV{"GDBG_NO_FORK"} ) {
 # run the main event loop, handling both
 # Gtk and IPC fifo events
 
-$view->run($model);
+$controller->run();
 
 
 #-------------------------------------------------

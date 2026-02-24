@@ -2,7 +2,7 @@ version: '3.3'
 
 services:
 
-  # keycloak
+  # debuger ui
   gdbg:
     build:
       context: .

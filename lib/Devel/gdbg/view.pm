@@ -60,7 +60,7 @@ sub add {
 
 sub init {
 
-	my $self   = shift;
+	my $self = shift;
     
 	Gtk3::init();
 
