@@ -425,6 +425,8 @@ sub new {
 	my $self = {
 		uixml         => $RealBin."/gdbg.ui", # path to glade xml ui definition
 		scheme        => undef,
+		zoom          => 10,
+
 		widgets       => {
 			sourceBuffers => {},
 			searchCtx     => undef,
@@ -837,6 +839,18 @@ sub build_ui {
 	# enable button stop, just to be sure
     #$self->buttonStop->set_sensitive(1);
 
+	if( $ENV{"GDBG_RESTART_CMD"} ) {
+
+		my $menuItem = Gtk3::MenuItem->new_with_label("Restart Docker Container");
+		$self->fileMenu->append($menuItem);
+		$menuItem->signal_connect( 
+			'activate' => sub {
+
+				return $controller->onRestartDocker( @_ );
+			}
+		);
+	}
+
     # show the UI
     $self->mainWindow->show_all();
 }
@@ -848,6 +862,7 @@ sub build_ui {
 
 package controller;
 use parent 'Devel::gdbg::controller';
+use Encode;
 use strict;
 
 sub new {
@@ -936,14 +951,14 @@ sub onStop :Action {
     #	print "KILL $pid\n";
 	if(!$ENV{"GDBG_KILL_CMD"}) {
 
-	    kill 'INT', $model->pid;
+	    kill 'INT', $model->{pid};
 	}
 	else {
 		my $cmd = $ENV{"GDBG_KILL_CMD"};
 
 		# if $cmd contains the string '{{PID}}',
 		# replace with current $pid
-		my $pid = $model->pid;
+		my $pid = $model->{pid};
 		$cmd =~ s/\{\{PID\}\}/$pid/;
 
 		system("bash -c '$cmd'");
@@ -1049,6 +1064,8 @@ sub onReload :Action {
 	my $widget = shift;
 	my $event  = shift;
 
+print STDERR "RELOAD!\n";
+
 	my $model = $self->model;
 
 	$model->rpc->fetch(
@@ -1073,6 +1090,62 @@ sub onFiles :Action {
 
 	$view->sourceView->set_buffer($view->filesBuffer);
 	$view->status("Files loaded by the debugger:");
+}
+
+sub onZoomIn :Accel(<ctrl>plus) {
+
+	my $self = shift;
+
+	my $model = $self->model;
+	my $view  = $self->view;
+
+	my $styleCtx = $view->sourceView->get_style_context();
+
+	my $oldProvider = $view->{provider};
+	if( $oldProvider ) {
+		$styleCtx->remove_provider($oldProvider);
+	}
+
+	my $zoom = $view->{zoom};
+
+	if($zoom < 100) {
+		$zoom += 2;
+		$view->{zoom} = $zoom;
+	}
+	my $css = "textview { font-family: Monospace; font-size: ".$zoom."pt; } ";
+
+	my $provider = Gtk3::CssProvider->new();
+	$provider->load_from_data(Encode::encode_utf8($css));
+	$styleCtx->add_provider( $provider, 600 ); # 'STYLE_PROVIDER_PRIORITY_APPLICATION');
+	$view->{provider} = $provider;
+}
+
+sub onZoomOut :Accel(<ctrl>minus) {
+
+	my $self = shift;
+
+	my $model = $self->model;
+	my $view  = $self->view;
+
+	my $styleCtx = $view->sourceView->get_style_context();
+
+	my $oldProvider = $view->{provider};
+	if( $oldProvider ) {
+		$styleCtx->remove_provider($oldProvider);
+	}
+
+	my $zoom = $view->{zoom};
+
+	if($zoom > 8) {
+		$zoom -= 2;
+		$view->{zoom} = $zoom;
+	}
+	my $css = "textview { font-family: Monospace; font-size: ".$zoom."pt; } ";
+
+	my $provider = Gtk3::CssProvider->new();
+	$provider->load_from_data(Encode::encode_utf8($css));
+	$styleCtx->add_provider( $provider, 600 ); # 'STYLE_PROVIDER_PRIORITY_APPLICATION');
+	$view->{provider} = $provider;
 }
 
 #-------------------------------------------------
@@ -1349,6 +1422,30 @@ sub onDestroy {
 	my $model = $self->model;
 
     $model->{quit} = 1;
+}
+
+sub onRestartDocker {
+
+	my $self = shift;
+
+	my $model = $self->model;
+
+	my $cmd = $ENV{"GDBG_RESTART_CMD"};
+
+print STDERR "RESTART: $cmd\n";
+
+	return if !$cmd;
+
+	# if $cmd contains the string '{{PID}}',
+	# replace with current $pid
+	my $pid = $model->{pid};
+	$cmd =~ s/\{\{PID\}\}/$pid/;
+
+print STDERR "RESTART: $cmd\n";
+
+	system("bash -c '$cmd &'");	
+
+	$self->view->status("RESTARTING ...............");	
 }
 
 #-------------------------------------------------

@@ -159,6 +159,7 @@ sub build_ui {
 		my $key     = $accel->{key};
 		my $handler = $accel->{handler};
 
+print "ACCEL: $key\n";
 		my ($key,$mod) = Gtk3::accelerator_parse($key);
 		$self->accel->connect( $key, $mod, [], sub {
 

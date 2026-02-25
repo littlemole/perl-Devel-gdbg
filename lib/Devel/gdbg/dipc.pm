@@ -210,7 +210,7 @@ sub _makemyfifo {
 
 	if( -e $path ) { return }
 
-    mkfifo( $path, 0777 ) || die "mkfifo $path already exists: $!"; 
+    mkfifo( $path, 0777 );# || die "mkfifo $path already exists: $!"; 
 }
 
 ###############################################

@@ -61,6 +61,11 @@
 		<property name="can-focus">False</property>
 		<property name="icon-name">system-search-symbolic</property>
 	</object>
+	<object class="GtkImage" id="imageReload">
+		<property name="visible">True</property>
+		<property name="can-focus">False</property>
+		<property name="icon-name">gtk-refresh</property>
+	</object>
 
 	<object class="GtkDialog" id="searchDialog">
 		<property name="title">Search Settings</property>
@@ -233,7 +238,7 @@
 										<property name="label" translatable="yes">_File</property>
 										<property name="use-underline">True</property>
 										<child type="submenu">
-											<object class="GtkMenu">
+											<object class="GtkMenu" id="fileMenu">
 												<property name="visible">True</property>
 												<property name="can-focus">False</property>
 												<child>
@@ -537,6 +542,21 @@ stepping over any function calls.</property>
 								<property name="tooltip-text" translatable="yes">Show lexical variables</property>
 								<property name="image">imageLexicals</property>
 								<property name="action-name">win.onLexicals</property>
+							</object>
+							<packing>
+								<property name="expand">False</property>
+								<property name="fill">True</property>
+								<property name="position">9</property>
+							</packing>
+						</child>
+						<child>
+							<object class="GtkButton" id="buttonReloadFile">
+								<property name="visible">True</property>
+								<property name="can-focus">True</property>
+								<property name="receives-default">True</property>
+								<property name="tooltip-text" translatable="yes">Reload Current File</property>
+								<property name="image">imageReload</property>
+								<property name="action-name">win.onReload</property>
 							</object>
 							<packing>
 								<property name="expand">False</property>

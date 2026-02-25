@@ -5,18 +5,25 @@
 #include <sys/socket.h>
 #include <sys/un.h>
 
-/*
-This is a setuod executable.
 
-- do not take any user input
-- do not make it writeable
-*/
+static char HTTP_REQUEST_KILL[] = "POST /containers/otobo-web-1/kill?signal=SIGINT HTTP/1.0\r\n\r\n";
 
-static char HTTP_REQUEST[] = "POST /containers/otobo-web-1/kill?signal=SIGINT HTTP/1.0\r\n\r\n";
+static char HTTP_REQUEST_RESTART[] = "POST /containers/otobo-web-1/restart HTTP/1.0\r\n\r\n";
+
 static char DOCKER_SOCK[]  = "/tmp/docker.sock"; 
 
-int main() 
+int main(int argc, char** argv) 
 {
+	char* HTTP_REQUEST = HTTP_REQUEST_KILL;
+
+	if(argc > 1) 
+	{
+		if( strcmp("restart",argv[1]) == 0 )
+		{
+			HTTP_REQUEST = HTTP_REQUEST_RESTART;
+		} 
+	}
+
 	int fd = socket(AF_UNIX, SOCK_STREAM, 0);
 
 	struct sockaddr_un server_addr;
