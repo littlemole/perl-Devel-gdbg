@@ -450,8 +450,8 @@ sub new {
 # get full text source from a existing source buffer
 sub getSource {
 
-	my $self     = shift;
-	my $filename = shift;
+	my $self      = shift;
+	my $filename  = shift;
 
 	my $buf       = $self->sourceBuffers->{$filename};
 	my $startiter = $buf->get_start_iter();
@@ -582,6 +582,9 @@ sub find_root {
 
 
 # populate an Gtk TreeView node
+# called from populate_lexicals()
+# will recursively call populate_lexicals()
+# in case of compound items (arrays or hash)
 
 sub populate_item {
 
@@ -630,6 +633,11 @@ sub populate_item {
 }
 
 # populate the tree view (or parts of it)
+# used to display top level of tree view,
+# or to expand a child node. expects an
+# array or hash to display. will call
+# populate_item() which migith call this
+# function back recursively
 
 sub populate_lexicals {
 
@@ -720,10 +728,11 @@ sub build_ui {
 	$self->SUPER::build_ui($uixml,$controller);
 
     #css
-    my $provider = Gtk3::CssProvider->new();
-    print STDERR $RealBin."/gdbg.css\n";
     my $css = Glib::IO::File::new_for_path($RealBin."/gdbg.css");
+
+    my $provider = Gtk3::CssProvider->new();
     $provider->load_from_file($css);
+
     my $screen = Gdk::Screen::get_default();
     Gtk3::StyleContext::add_provider_for_screen($screen, $provider, 400); 
 
@@ -1078,8 +1087,6 @@ sub onReload :Action {
 	my $self   = shift;
 	my $widget = shift;
 	my $event  = shift;
-
-print STDERR "RELOAD!\n";
 
 	my $model = $self->model;
 
@@ -1449,16 +1456,12 @@ sub onRestartDocker {
 
 	my $cmd = $ENV{"GDBG_RESTART_CMD"};
 
-print STDERR "RESTART: $cmd\n";
-
 	return if !$cmd;
 
 	# if $cmd contains the string '{{PID}}',
 	# replace with current $pid
 	my $pid = $model->{pid};
 	$cmd =~ s/\{\{PID\}\}/$pid/;
-
-print STDERR "RESTART: $cmd\n";
 
 	system("bash -c '$cmd &'");	
 
