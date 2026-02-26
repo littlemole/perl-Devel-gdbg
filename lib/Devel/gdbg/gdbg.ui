@@ -34,7 +34,7 @@
 	<object class="GtkImage" id="imageLexicals">
 		<property name="visible">True</property>
 		<property name="can-focus">False</property>
-		<property name="stock">gtk-properties</property>
+		<property name="icon-name">emblem-system</property>
 	</object>
 	<object class="GtkImage" id="imageOut">
 		<property name="visible">True</property>
@@ -468,6 +468,51 @@ stepping over any function calls.</property>
 							</packing>
 						</child>
 						<child>
+							<object class="GtkButton" id="buttonReloadFile">
+								<property name="visible">True</property>
+								<property name="can-focus">True</property>
+								<property name="receives-default">True</property>
+								<property name="tooltip-text" translatable="yes">Reload Current File</property>
+								<property name="image">imageReload</property>
+								<property name="action-name">win.onReload</property>
+							</object>
+							<packing>
+								<property name="expand">False</property>
+								<property name="fill">True</property>
+								<property name="position">5</property>
+							</packing>
+						</child>
+						<child>
+							<object class="GtkButton" id="buttonLexicals">
+								<property name="visible">True</property>
+								<property name="can-focus">True</property>
+								<property name="receives-default">True</property>
+								<property name="tooltip-text" translatable="yes">Show lexical variables</property>
+								<property name="image">imageLexicals</property>
+								<property name="action-name">win.onLexicals</property>
+							</object>
+							<packing>
+								<property name="expand">False</property>
+								<property name="fill">True</property>
+								<property name="position">6</property>
+							</packing>
+						</child>
+						<child>
+							<object class="GtkButton" id="buttonHome">
+								<property name="visible">True</property>
+								<property name="can-focus">True</property>
+								<property name="receives-default">True</property>
+								<property name="tooltip-text" translatable="yes">Go to current line being debugged.</property>
+								<property name="image">imageHome</property>
+								<property name="action-name">win.onScroll</property>
+							</object>
+							<packing>
+								<property name="expand">False</property>
+								<property name="fill">True</property>
+								<property name="position">7</property>
+							</packing>
+						</child>
+						<child>
 							<object class="GtkLabel">
 								<property name="visible">True</property>
 								<property name="can-focus">False</property>
@@ -475,7 +520,7 @@ stepping over any function calls.</property>
 							<packing>
 								<property name="expand">True</property>
 								<property name="fill">True</property>
-								<property name="position">5</property>
+								<property name="position">8</property>
 							</packing>
 						</child>
 						<child>
@@ -494,7 +539,7 @@ stepping over any function calls.</property>
 									<packing>
 										<property name="expand">False</property>
 										<property name="fill">True</property>
-										<property name="position">6</property>
+										<property name="position">1</property>
 									</packing>
 								</child>
 								<child>
@@ -509,7 +554,7 @@ stepping over any function calls.</property>
 									<packing>
 										<property name="expand">False</property>
 										<property name="fill">True</property>
-										<property name="position">7</property>
+										<property name="position">2</property>
 									</packing>
 								</child>
 								<child>
@@ -524,59 +569,14 @@ stepping over any function calls.</property>
 									<packing>
 										<property name="expand">False</property>
 										<property name="fill">True</property>
-										<property name="position">7</property>
+										<property name="position">3</property>
 									</packing>
 								</child>
 							</object>
 							<packing>
 								<property name="expand">False</property>
 								<property name="fill">True</property>
-								<property name="position">8</property>
-							</packing>
-						</child>
-						<child>
-							<object class="GtkButton" id="buttonLexicals">
-								<property name="visible">True</property>
-								<property name="can-focus">True</property>
-								<property name="receives-default">True</property>
-								<property name="tooltip-text" translatable="yes">Show lexical variables</property>
-								<property name="image">imageLexicals</property>
-								<property name="action-name">win.onLexicals</property>
-							</object>
-							<packing>
-								<property name="expand">False</property>
-								<property name="fill">True</property>
 								<property name="position">9</property>
-							</packing>
-						</child>
-						<child>
-							<object class="GtkButton" id="buttonReloadFile">
-								<property name="visible">True</property>
-								<property name="can-focus">True</property>
-								<property name="receives-default">True</property>
-								<property name="tooltip-text" translatable="yes">Reload Current File</property>
-								<property name="image">imageReload</property>
-								<property name="action-name">win.onReload</property>
-							</object>
-							<packing>
-								<property name="expand">False</property>
-								<property name="fill">True</property>
-								<property name="position">9</property>
-							</packing>
-						</child>
-						<child>
-							<object class="GtkButton" id="buttonHome">
-								<property name="visible">True</property>
-								<property name="can-focus">True</property>
-								<property name="receives-default">True</property>
-								<property name="tooltip-text" translatable="yes">Go to current line being debugged.</property>
-								<property name="image">imageHome</property>
-								<property name="action-name">win.onScroll</property>
-							</object>
-							<packing>
-								<property name="expand">False</property>
-								<property name="fill">True</property>
-								<property name="position">10</property>
 							</packing>
 						</child>
 					</object>

@@ -393,14 +393,17 @@ sub enableButtons {
     $view->buttonOver->set_sensitive($state);
     $view->buttonOut->set_sensitive($state);
     $view->buttonLexicals->set_sensitive($state);
-    $view->buttonHome->set_sensitive($state);
+#   $view->buttonHome->set_sensitive($state);
     $view->evalEntry->set_sensitive($state);
     $view->lexicalsMenu->set_sensitive($state);
     $view->breakpointsMenu->set_sensitive($state);
+	$view->saveBreakpointsMenu->set_sensitive($state);
     $view->openFileMenu->set_sensitive($state);
     $view->showSubsMenu->set_sensitive($state);
     $view->showFilesMenu->set_sensitive($state);
     $view->lexicalTreeView->set_sensitive($state);
+	$view->buttonReloadFile->set_sensitive($state);
+	$view->reloadMenu->set_sensitive($state);
 
     $view->buttonStop->set_sensitive( $state ? 0 : 1 );
 }
@@ -711,6 +714,14 @@ sub build_ui {
 	my $uixml      = $self->{uixml};
 
 	$self->SUPER::build_ui($uixml,$controller);
+
+    #css
+    my $provider = Gtk3::CssProvider->new();
+    print STDERR $RealBin."/gdbg.css\n";
+    my $css = Glib::IO::File::new_for_path($RealBin."/gdbg.css");
+    $provider->load_from_file($css);
+    my $screen = Gdk::Screen::get_default();
+    Gtk3::StyleContext::add_provider_for_screen($screen, $provider, 400); 
 
 	# Perl syntax highlighting support
     my $langManager = Gtk::Source::LanguageManager->new();
@@ -1069,8 +1080,10 @@ print STDERR "RELOAD!\n";
 	my $model = $self->model;
 
 	$model->rpc->fetch(
-		$model->currentFile,
-		$model->currentLine
+		$model->{openFile},
+		$model->{openFile} eq $model->currentFile 
+			? $model->currentLine
+			: 1
 	);	
 }
 

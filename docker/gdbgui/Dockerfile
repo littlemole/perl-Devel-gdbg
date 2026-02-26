@@ -33,15 +33,14 @@ RUN chmod a+rx /opt/*.sh
 # /tmp/docker.sock local UNIX socket to
 # the otobo-web-1 docker container.
 COPY kill.c /opt/
-RUN gcc /opt/kill.c -o /opt/kill
+ARG OTOBO_PROJECT_NAME
+RUN gcc -D OTOBO_PROJECT_NAME=$OTOBO_PROJECT_NAME /opt/kill.c -o /opt/kill
 RUN chown root:root /opt/kill
 RUN chmod a+rxs /opt/kill
 
 # add Perl Debugger code
 RUN mkdir -p /usr/share/perl5/Devel/
 
-COPY lib/Devel/gdbg/gdbgui.pl /opt
-COPY lib/Devel/gdbg/gdbg.ui /opt
 COPY lib/Devel/ /usr/share/perl5/Devel/
 
 # drop root privileges
