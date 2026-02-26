@@ -346,8 +346,11 @@ sub loadBuffer {
 	$view->sourceBuffers->{$file} = $buf;
 
 	# add file to combo box
-	$view->sourcesCombo->append($file,$file);
-	$view->sourcesCombo->set_active_id($file);
+	$view->sourcesCombo->remove_all();
+	my @files = sort keys $self->{files}->%*; 
+	for my $f( @files ) {
+		$view->sourcesCombo->append($f,$f);
+	}
 
 	return $buf;
 }
