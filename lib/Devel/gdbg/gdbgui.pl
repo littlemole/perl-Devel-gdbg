@@ -351,6 +351,7 @@ sub loadBuffer {
 	for my $f( @files ) {
 		$view->sourcesCombo->append($f,$f);
 	}
+	$view->sourcesCombo->set_active_id($file);
 
 	return $buf;
 }
