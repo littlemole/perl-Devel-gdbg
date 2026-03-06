@@ -202,6 +202,9 @@ sub	setbreakpoints :RPC {
 
 	my @lines = split ',' , $lines;
 
+use Data::Dumper;
+print STDERR "BR lines".Dumper(\@lines);
+
 	my $buf = $view->sourceBuffers->{$file};
 	if(!$buf) {
 		return;
@@ -1069,6 +1072,33 @@ sub onStoreBreakpoints :Action {
 	my $model = $self->model;
 
 	$model->rpc->storebreakpoints();
+}
+
+sub onDeleteAllBreakpoints :Action {
+
+	my $self = shift;
+
+	my $model = $self->model;
+
+	$model->rpc->deleteBreakpoints('All');
+}
+
+sub onDeleteThisBreakpoints :Action {
+
+	my $self = shift;
+
+	my $model = $self->model;
+
+	$model->rpc->deleteBreakpoints('This',$model->currentFile);
+}
+
+sub onDeleteOtherBreakpoints :Action {
+
+	my $self = shift;
+
+	my $model = $self->model;
+
+	$model->rpc->deleteBreakpoints('Other',$model->currentFile);
 }
 
 # show subroutines window menu handler

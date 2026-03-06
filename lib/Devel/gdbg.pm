@@ -976,7 +976,99 @@ my %msg_handlers = (
 			my$src = slurp($abspath);
 			$rpc->load($file,$line,$src);
 		}
+		getBreakpointsForFile($file);
+
 	},
+	deleteBreakpoints => sub {
+		my $mode = shift;
+		my $file = shift;
+
+		my %files2update;
+
+		if( $mode eq 'All' ) {
+
+			for my $bp ( keys %breakpoints) {
+				my ($absfile,$line) = split ':', $bp;
+				my $f = $files{$absfile};
+
+				setdbline( $f, $line, 0 );
+
+				$files2update{$absfile} = 1;
+
+			}
+
+			%breakpoints = ();
+			%postpone    = (); 
+		}
+		elsif( $mode eq 'This' ) {
+
+			$files2update{$file} = 1;
+			my %bp2delete;
+
+			BP:
+			for my $bp ( keys %breakpoints) {
+				my ($absfile,$line) = split ':', $bp;
+
+				next BP if( $absfile ne $file);
+
+				my $f = $files{$absfile};
+
+				setdbline( $f, $line, 0 );
+
+				$bp2delete{$bp} = 1;
+			}
+
+			for my $bp ( keys %bp2delete ) {
+				delete $breakpoints{$bp};
+			}
+
+			delete $postpone{$file};
+		}
+		elsif( $mode eq 'Other' ) {
+
+			my %bp2delete;
+			my %pp2delete;
+
+			BP:
+			for my $bp ( keys %breakpoints) {
+				my ($absfile,$line) = split ':', $bp;
+
+				next BP if( $absfile eq $file);
+
+				my $f = $files{$absfile};
+
+				setdbline( $f, $line, 0 );
+
+				$bp2delete{$bp}         = 1;
+				$files2update{$absfile} = 1;
+			}
+
+			for my $bp ( keys %bp2delete ) {
+				delete $breakpoints{$bp};
+			}
+
+			for my $pp ( keys %postpone ) {
+
+				if( $pp ne $file ) {
+					$pp2delete{$pp}   = 1;
+					$files2update{pp} = 1;
+				}
+			}
+
+			for my $pp ( keys %pp2delete ) {
+				delete $postpone{$pp};
+			}
+
+			for my $f ( keys %files2update ) {
+				delete $postpone{$f};
+			}
+		}
+
+		for my $f ( keys %files2update ) {
+
+			getBreakpointsForFile($f);
+		}
+	}
 );
 
 # process a single msg from UI via its handler

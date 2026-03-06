@@ -267,12 +267,57 @@
 												</child>
 												<child>
 													<object class="GtkMenuItem"
-														id="saveBreakpointsMenu">
+														id="breakpointsMenu">
 														<property name="visible">True</property>
 														<property name="can-focus">False</property>
-														<property name="label" translatable="yes">Save Breakpoints</property>
+														<property name="label" translatable="yes">Breakpoints</property>
 														<property name="use-underline">True</property>
-														<property name="action-name">win.onStoreBreakpoints</property>
+														<child type="submenu">
+															<object class="GtkMenu" >
+																<property name="visible">True</property>
+																<property name="can-focus">False</property>
+																<child>
+																	<object class="GtkImageMenuItem"
+																		id="saveBreakpointsMenu">
+																		<property name="visible">True</property>
+																		<property name="can-focus">False</property>
+																		<property name="label" translatable="yes">Save Breakpoints</property>
+																		<property name="use-underline">True</property>
+																		<property name="action-name">win.onStoreBreakpoints</property>
+																	</object>
+																</child>
+																<child>
+																	<object class="GtkImageMenuItem"
+																		id="deleteAllBreakpointsMenu">
+																		<property name="visible">True</property>
+																		<property name="can-focus">False</property>
+																		<property name="label" translatable="yes">Delete all Breakpoints</property>
+																		<property name="use-underline">True</property>
+																		<property name="action-name">win.onDeleteAllBreakpoints</property>
+																	</object>
+																</child>
+																<child>
+																	<object class="GtkImageMenuItem"
+																		id="deleteThisFileBreakpointsMenu">
+																		<property name="visible">True</property>
+																		<property name="can-focus">False</property>
+																		<property name="label" translatable="yes">Delete all Breakpoints in the actual file</property>
+																		<property name="use-underline">True</property>
+																		<property name="action-name">win.onDeleteThisBreakpoints</property>
+																	</object>
+																</child>
+																<child>
+																	<object class="GtkImageMenuItem"
+																		id="deleteOtherFileBreakpointsMenu">
+																		<property name="visible">True</property>
+																		<property name="can-focus">False</property>
+																		<property name="label" translatable="yes">Delete all Breakpoints in all other files</property>
+																		<property name="use-underline">True</property>
+																		<property name="action-name">win.onDeleteOtherBreakpoints</property>
+																	</object>
+																</child>
+															</object>
+														</child>
 													</object>
 												</child>
 												<child>
@@ -308,7 +353,7 @@
 													</object>
 												</child>
 												<child>
-													<object class="GtkMenuItem" id="breakpointsMenu">
+													<object class="GtkMenuItem" id="showBreakpointsMenu">
 														<property name="visible">True</property>
 														<property name="can-focus">False</property>
 														<property name="label" translatable="yes">Show Breakpoints</property>
