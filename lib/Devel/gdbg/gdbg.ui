@@ -301,7 +301,7 @@
 																		id="deleteThisFileBreakpointsMenu">
 																		<property name="visible">True</property>
 																		<property name="can-focus">False</property>
-																		<property name="label" translatable="yes">Delete all Breakpoints in the actual file</property>
+																		<property name="label" translatable="yes">Delete all Breakpoints in the current file</property>
 																		<property name="use-underline">True</property>
 																		<property name="action-name">win.onDeleteThisBreakpoints</property>
 																	</object>

@@ -53,7 +53,7 @@ sub new {
 
 	bless $self, $class;
 
-	# prepare IPC over FIRO with debugger process
+	# prepare IPC over FIFO with debugger process
 	my $fifo_dir = $ENV{"GDBG_FIFO_DIR"} || '/tmp/';
 
     my $fifo = Devel::gdbg::dipc->new();
@@ -69,8 +69,8 @@ sub new {
 }
 
 #----------------------------------
-# RPC event handler send by
-# debugger process
+# RPC callbacks handle events 
+# send by the debugger process
 #----------------------------------
 
 sub	quit :RPC {
@@ -148,6 +148,7 @@ sub	lexicals :RPC {
 	$view->lexicalsBuffer->set_text( $info, -1 );
 	$view->sourceView->set_buffer($view->lexicalsBuffer);
 	$view->status("All current lexical variables:");
+	$self->enableButtons(1);	
 }
 
 sub	jsonlexicals :RPC {
@@ -189,6 +190,7 @@ sub	breakpoints :RPC {
 	$view->breakpointsBuffer->set_text( $info, -1 );
 	$view->sourceView->set_buffer($view->breakpointsBuffer);
 	$view->status("All breakpoints currently set:");
+	$self->enableButtons(1);	
 }
 
 sub	setbreakpoints :RPC {
@@ -201,9 +203,6 @@ sub	setbreakpoints :RPC {
 	my $view = $self->view;
 
 	my @lines = split ',' , $lines;
-
-use Data::Dumper;
-print STDERR "BR lines".Dumper(\@lines);
 
 	my $buf = $view->sourceBuffers->{$file};
 	if(!$buf) {
@@ -235,6 +234,7 @@ sub	load :RPC {
 
 	$self->{files}->{$file} = $src;
 	$self->scroll($file,$line);
+	$self->enableButtons(1);
 }
 
 sub	eval :RPC {
@@ -243,10 +243,31 @@ sub	eval :RPC {
 	my $self = shift;
 	my $evaled = shift // '<undef>';
 
+	$evaled = "\n$evaled\n";
+
 	my $view = $self->view;
 
-	$view->lexicalsBuffer->set_text( $evaled, -1 );
-	$view->sourceView->set_buffer($view->lexicalsBuffer);
+	my $buf = $view->evalBuffer;
+
+	my $iter;
+	my ($hasSelection,$start,$end) = $buf->get_selection_bounds();
+	if($hasSelection) {
+		$iter = $end;
+		my $r = $iter->forward_line();
+		if(!$r) {
+			$iter->forward_line();
+		}
+		$buf->place_cursor($start);
+	}
+	else {
+		my $mark = $buf->get_insert;
+		$iter = $buf->get_iter_at_mark($mark);
+	}
+	
+	$buf->insert($iter,$evaled,-1);
+#	$view->evalBuffer->set_text( $evaled, -1 );
+	$view->sourceView->set_buffer($buf);
+	$view->sourceView->set_editable(1);	
 }
 
 sub	subs :RPC {
@@ -260,10 +281,11 @@ sub	subs :RPC {
 	$view->subsBuffer->set_text( $subs, -1 );
 	$view->sourceView->set_buffer($view->subsBuffer);
 	$view->status("All subroutines loaded:");
+	$self->enableButtons(1);	
 }
 
 #----------------------------------
-# Debugger UI logic
+# Debugger UI Business Logic
 #----------------------------------
 
 # open a new file in the visual debugger
@@ -317,6 +339,7 @@ sub openFile {
 	$view->pump_msgs();
 
 	$self->rpc->getbreakpoints($filename);
+	$self->enableButtons(1);	
 }
 
 # load a file into a new source buffer
@@ -404,6 +427,8 @@ sub enableButtons {
     $view->evalEntry->set_sensitive($state);
     $view->lexicalsMenu->set_sensitive($state);
     $view->breakpointsMenu->set_sensitive($state);
+    $view->breakpointsMenu->set_sensitive($state);
+	$view->showBreakpointsMenu->set_sensitive($state);
 	$view->saveBreakpointsMenu->set_sensitive($state);
     $view->openFileMenu->set_sensitive($state);
     $view->showSubsMenu->set_sensitive($state);
@@ -411,6 +436,14 @@ sub enableButtons {
     $view->lexicalTreeView->set_sensitive($state);
 	$view->buttonReloadFile->set_sensitive($state);
 	$view->reloadMenu->set_sensitive($state);
+
+	if($view->sourceView->get_buffer() == $view->evalBuffer) {
+
+	    $view->sourceView->set_editable(1);
+	}
+	else {
+	    $view->sourceView->set_editable(0);
+	}
 
     $view->buttonStop->set_sensitive( $state ? 0 : 1 );
 }
@@ -499,13 +532,15 @@ sub getLineFromMouseClick {
 
 	# now ask for iter
 	my ($r2,$iter) = $widget->get_iter_at_position($x,$y);
-	$iter->forward_line();
+	my $r = $iter->forward_line();
 
 	# get the line from the iter, (which is line+1)
 	my $line = $iter->get_line();
 
 	# adjust the iter again, now have correct line
-	$iter->backward_line();
+	if($r) {
+		$iter->backward_line();
+	}
 
 	# the line source text
 	my $text = $self->getLine($iter,$widget->get_buffer(),$line);
@@ -756,6 +791,12 @@ sub build_ui {
     $self->sourceView->set_wrap_mode('none');
     $self->sourceView->set_mark_attributes( "error", $attrs, 10 );
 
+	$self->sourceView->signal_connect( 
+		'populate-popup' => sub {
+			return $controller->onPopulatePopup( @_ );
+		}
+	);
+
     # theme support for buffers
     my $manager = Gtk::Source::StyleSchemeManager::get_default();
 
@@ -802,6 +843,11 @@ sub build_ui {
     my $breakpointsBuffer = Gtk::Source::Buffer->new();
     $breakpointsBuffer->set_style_scheme($self->scheme);
 	$self->add( breakpointsBuffer => $breakpointsBuffer );
+
+	# buffer for eval results
+    my $evalBuffer = Gtk::Source::Buffer->new();
+    $evalBuffer->set_style_scheme($self->scheme);
+	$self->add( evalBuffer => $evalBuffer );
 
 	# prepare the var inspection tree view
 	my $treeModel = $self->LexicalTreeStore();
@@ -1000,10 +1046,49 @@ sub onEval :Action {
 	my $model = $self->model;
 	my $view  = $self->view;
 
+	return if($model->uiDisabled);
+
     my $e = $view->evalEntry->get_text();
 	$model->rpc->eval( $e );
 }
 
+# user evaluates in eval window
+sub onEvaluate :Action :Accel(<ctrl>e) {
+
+	my $self = shift;
+
+	my $model = $self->model;
+	my $view  = $self->view;
+
+	return if($model->uiDisabled);
+
+	my $buf = $view->sourceView->get_buffer();
+
+	my ($hasSelection,$start,$end) = $buf->get_selection_bounds();
+	if(!$hasSelection) {
+		return;
+	}
+	my $txt = $buf->get_text($start,$end,0);
+	$model->rpc->eval( $txt );
+}
+
+# user evaluates in eval window, Dump version
+sub onDump :Action :Accel(<ctrl>d) {
+
+	my $self = shift;
+
+	my $model = $self->model;
+	my $view  = $self->view;
+
+	my $buf = $view->sourceView->get_buffer();
+
+	my ($hasSelection,$start,$end) = $buf->get_selection_bounds();
+	if(!$hasSelection) {
+		return;
+	}
+	my $txt = $buf->get_text($start,$end,0);
+	$model->rpc->eval( 'Dumper('.$txt.')' );
+}
 
 # user selected open-file from menu
 sub onOpen :Action {
@@ -1089,7 +1174,7 @@ sub onDeleteThisBreakpoints :Action {
 
 	my $model = $self->model;
 
-	$model->rpc->deleteBreakpoints('This',$model->currentFile);
+	$model->rpc->deleteBreakpoints('This',$model->openFile);
 }
 
 sub onDeleteOtherBreakpoints :Action {
@@ -1098,7 +1183,7 @@ sub onDeleteOtherBreakpoints :Action {
 
 	my $model = $self->model;
 
-	$model->rpc->deleteBreakpoints('Other',$model->currentFile);
+	$model->rpc->deleteBreakpoints('Other',$model->openFile);
 }
 
 # show subroutines window menu handler
@@ -1144,6 +1229,7 @@ sub onFiles :Action {
 
 	$view->sourceView->set_buffer($view->filesBuffer);
 	$view->status("Files loaded by the debugger:");
+	$model->enableButtons(1);	
 }
 
 sub onZoomIn :Accel(<ctrl>plus) {
@@ -1230,6 +1316,12 @@ sub onMarker {
 		return;
 	}
 
+	my $start = $iter;
+	my $end   = $start->copy;
+	$end->forward_line;
+
+	$buf->remove_source_marks($start,$end,"error");
+
 	# get line and filename
     my $line = $iter->get_line() + 1;
 
@@ -1246,12 +1338,12 @@ sub onMarker {
 		$view->sourceBuffers->{$model->filename},
 		$line
 	);
-	if( !$text || $text eq "" || 
-	    $text =~ /^\s*((use)|(no)|(require)|(package)|#)/ ||
-		$text =~ /^\s+$/ ) 
-	{
-		return;
-	}
+	# if( !$text || $text eq "" || 
+	#     $text =~ /^\s*((use)|(no)|(require)|(package)|#)/ ||
+	# 	$text =~ /^\s+$/ ) 
+	# {
+	# 	return;
+	# }
 
 	$model->rpc->breakpoint(
 		$model->filename,
@@ -1326,6 +1418,7 @@ sub onToggleRunning :Accel(<ctrl>space) {
 		onRun();
 	}
 }
+
 
 # user clicks the call frame stack
 sub onInfoPaneClick {
@@ -1498,6 +1591,42 @@ sub onRestartDocker {
 	$self->view->status("RESTARTING ...............");	
 }
 
+sub onPopulatePopup {
+
+	my $self   = shift;
+	my $widget = shift;
+	my $popup  = shift;
+
+	my $model = $self->model;
+	my $view  = $self->view;
+
+	return if($model->uiDisabled);
+
+	my $menu = Gtk3::MenuItem->new_with_label("Dump");
+
+	$menu->signal_connect(
+		'activate' => sub {
+
+			$self->onDump(@_);
+		}
+	);
+
+	$popup->insert( $menu, 0);
+
+	$menu = Gtk3::MenuItem->new_with_label("Eval");
+
+	$menu->signal_connect(
+		'activate' => sub {
+
+			$self->onEvaluate(@_);
+		}
+	);
+
+	$popup->insert( $menu, 0);
+
+	$popup->show_all;
+}
+
 #-------------------------------------------------
 # UI search support
 #-------------------------------------------------
@@ -1506,7 +1635,7 @@ sub onSearch {
 
 	my $self   = shift;
 	my $widget = shift;
-	my $event   = shift;
+	my $event  = shift;
 
 	my $key = $event->get_keyval();
 

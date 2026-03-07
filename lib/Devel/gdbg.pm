@@ -628,7 +628,7 @@ sub expand_lex {
 				if(index($lastSelection,"$c") == 0) {
 					$expand = 1;
 				}
-				push @result, expand_lex($item,$isRoot,$level+1);
+				push @result, expand_lex($item,$expand,$level+1);
 				$c++;
 			}
 			return {
@@ -798,8 +798,8 @@ sub checkdbline($$) {
 		return -1;
 	}
 
-    no strict;
-    my $flag = $dbline[$lineno] != 0;
+#    no strict;
+#    my $flag = $dbline[$lineno] != 0;
 
     return 1;
 }
