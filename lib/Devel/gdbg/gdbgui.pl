@@ -418,25 +418,19 @@ sub enableButtons {
 
 	$self->{uiDisabled} = $state ? 0 : 1;
 
-    $view->buttonRun->set_sensitive($state);
-    $view->buttonStep->set_sensitive($state);
-    $view->buttonOver->set_sensitive($state);
-    $view->buttonOut->set_sensitive($state);
-    $view->buttonLexicals->set_sensitive($state);
-#   $view->buttonHome->set_sensitive($state);
-    $view->evalEntry->set_sensitive($state);
-    $view->lexicalsMenu->set_sensitive($state);
-    $view->breakpointsMenu->set_sensitive($state);
-    $view->breakpointsMenu->set_sensitive($state);
-	$view->showEvalMenu->set_sensitive($state);
-	$view->showBreakpointsMenu->set_sensitive($state);
-	$view->saveBreakpointsMenu->set_sensitive($state);
-    $view->openFileMenu->set_sensitive($state);
-    $view->showSubsMenu->set_sensitive($state);
-    $view->showFilesMenu->set_sensitive($state);
-    $view->lexicalTreeView->set_sensitive($state);
-	$view->buttonReloadFile->set_sensitive($state);
-	$view->reloadMenu->set_sensitive($state);
+	my @UIElements = qw( buttonRun buttonStep
+		buttonOver buttonOut buttonLexicals
+		evalEntry lexicalsMenu breakpointsMenu
+		showEvalMenu showBreakpointsMenu
+		saveBreakpointsMenu openFileMenu
+		showSubsMenu showFilesMenu
+		lexicalTreeView buttonReloadFile
+		reloadMenu
+	);
+
+	for my $UIElement ( @UIElements ) {
+		$view->{widgets}->{$UIElement}->set_sensitive($state);
+	}
 
 	if($view->sourceView->get_buffer() == $view->evalBuffer) {
 
@@ -1545,12 +1539,17 @@ sub onTheme {
 			$view->scheme
 		);
     }
-	
-	$view->infoBuffer->set_style_scheme($view->scheme);        
-	$view->lexicalsBuffer->set_style_scheme($view->scheme);    
-	$view->subsBuffer->set_style_scheme($view->scheme);		
-	$view->filesBuffer->set_style_scheme($view->scheme);	   
-	$view->breakpointsBuffer->set_style_scheme($view->scheme); 
+
+	my @Buffers2Style = qw(infoBuffer lexicalsBuffer subsBuffer
+		filesBuffer breakpointsBuffer evalBuffer
+	);
+
+    foreach my $key ( @Buffers2Style ) {
+
+        $view->{widgets}->{$key}->set_style_scheme(
+			$view->scheme
+		);
+    }
 }
 
 # user selects source from combo box
