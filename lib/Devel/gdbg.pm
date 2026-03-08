@@ -924,6 +924,8 @@ my %msg_handlers = (
 		my $file = find_module($fun);
 		my $line = getSubLine($fun);
 
+		return if( ! -e $file );
+		
 		$rpc->show( $file, $line );
 		getBreakpointsForFile($file);
 	},

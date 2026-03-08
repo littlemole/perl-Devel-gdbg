@@ -428,6 +428,7 @@ sub enableButtons {
     $view->lexicalsMenu->set_sensitive($state);
     $view->breakpointsMenu->set_sensitive($state);
     $view->breakpointsMenu->set_sensitive($state);
+	$view->showEvalMenu->set_sensitive($state);
 	$view->showBreakpointsMenu->set_sensitive($state);
 	$view->saveBreakpointsMenu->set_sensitive($state);
     $view->openFileMenu->set_sensitive($state);
@@ -1232,6 +1233,18 @@ sub onFiles :Action {
 	$model->enableButtons(1);	
 }
 
+sub onEvalWindow :Action {
+
+	my $self = shift;
+
+	my $model = $self->model;
+	my $view  = $self->view;
+
+	my $buf = $view->evalBuffer;
+	$view->sourceView->set_buffer($buf);
+	$view->sourceView->set_editable(1);	
+}
+
 sub onZoomIn :Accel(<ctrl>plus) {
 
 	my $self = shift;
@@ -1601,6 +1614,12 @@ sub onPopulatePopup {
 	my $view  = $self->view;
 
 	return if($model->uiDisabled);
+
+	my $buf = $view->sourceView->get_buffer();
+
+	if($buf == $view->subsBuffer) {
+		return;
+	}
 
 	my $menu = Gtk3::MenuItem->new_with_label("Dump");
 
