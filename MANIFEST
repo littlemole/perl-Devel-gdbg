@@ -9,7 +9,6 @@ docker/gdbgui/xsettings.xml
 lib/Devel/gdbg.pm
 lib/Devel/gdbg/controller.pm
 lib/Devel/gdbg/dipc.pm
-lib/Devel/gdbg/fun.sh
 lib/Devel/gdbg/gdbg.css
 lib/Devel/gdbg/gdbg.ui
 lib/Devel/gdbg/gdbgui.pl
